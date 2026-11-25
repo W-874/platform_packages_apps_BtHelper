@@ -8,14 +8,15 @@
 
 package com.android.bluetooth.bthelper
 
+import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.UserHandle
-import android.util.Log
 import com.android.bluetooth.bthelper.pods.PodsService
 import com.android.bluetooth.bthelper.utils.BtActionsFilter
 
@@ -46,27 +47,23 @@ class StartupReceiver : BroadcastReceiver() {
         if (!isPods(device)) return
 
         when (intent.action) {
-            BluetoothDevice.ACTION_NAME_CHANGED -> {
-                maybeRenamePods(context, intent, device)
+            BluetoothDevice.ACTION_NAME_CHANGED -> maybeRenamePods(context, intent, device)
+            // A headset can retain its AACP link while individual audio profiles disconnect.
+            BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                if (intent.getIntExtra(BluetoothDevice.EXTRA_TRANSPORT, BluetoothDevice.TRANSPORT_AUTO) !=
+                    BluetoothDevice.TRANSPORT_LE
+                ) {
+                    maybeStopPodsService(context, device)
+                }
             }
-            else -> {
-                btProfileChanges(context, intent, device)
+            BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
+            BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                if (intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothAdapter.ERROR) ==
+                    BluetoothProfile.STATE_CONNECTED
+                ) {
+                    maybeStartPodsService(context, device)
+                }
             }
-        }
-    }
-
-    private fun btProfileChanges(context: Context, intent: Intent, device: BluetoothDevice) {
-        var state: Int = BluetoothAdapter.ERROR
-        try {
-            state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothAdapter.ERROR)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get profile state", e)
-            return
-        }
-
-        when (state) {
-            BluetoothProfile.STATE_CONNECTED -> maybeStartPodsService(context, device)
-            BluetoothProfile.STATE_DISCONNECTED -> maybeStopPodsService(context, device)
         }
     }
 

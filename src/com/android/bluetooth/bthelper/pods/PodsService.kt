@@ -65,7 +65,6 @@ import com.android.bluetooth.bthelper.setSingleDevice
 import com.android.bluetooth.bthelper.utils.A2dpReceiver
 import com.android.bluetooth.bthelper.utils.AACPManager
 import com.android.bluetooth.bthelper.utils.AACPManager.StemPressType
-import com.android.bluetooth.bthelper.utils.ATTManager
 import com.android.bluetooth.bthelper.utils.AirPodsNotifications
 import com.android.bluetooth.bthelper.utils.BLEManager
 import com.android.bluetooth.bthelper.utils.BatteryComponent
@@ -154,7 +153,6 @@ class PodsService :
 
     private var config: ServiceConfig? = null
     private var bluetoothSocketManager: BluetoothSocketManager? = null
-    private var attManager: ATTManager? = null
 
     private var currentDevice: BluetoothDevice? = null
 
@@ -560,6 +558,7 @@ class PodsService :
 
     @Synchronized
     private fun processEarDetectionChange(earDetection: ByteArray) {
+        if (!earDetectNotif.isEarDetectionData(earDetection)) return
         var inEar = false
         var inEarData =
             listOf(
@@ -906,14 +905,9 @@ class PodsService :
         bluetoothSocketManager =
             BluetoothSocketManager(
                 serviceScope,
-                { device -> startAttManager(device) },
                 { startHeadTracking() },
                 { stopHeadTracking() },
                 { setupStemActions() },
-                {
-                    stopAttManager()
-                    BluetoothConnectionManager.isConnected = false
-                },
             )
 
         registerReceiver(ancModeReceiver, ancModeFilter, RECEIVER_NOT_EXPORTED)
@@ -925,16 +919,6 @@ class PodsService :
         cameraStateMonitor = CameraStateMonitor(this)
         cameraStateMonitor?.onCreate()
         cameraStateMonitor?.registerListener(this)
-    }
-
-    fun startAttManager(device: BluetoothDevice) {
-        attManager = ATTManager(serviceScope)
-        attManager?.connectToSocket(device)
-    }
-
-    fun stopAttManager() {
-        attManager?.disconnect()
-        attManager = null
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -968,25 +952,11 @@ class PodsService :
                 currentDevice?.equals(device) == true &&
                 intent?.action == Constants.ACTION_DISCONNECTED
         ) {
-            BluetoothConnectionManager.isConnected = false
             stopSelf()
             return START_STICKY
         }
 
-        if (currentDevice != null && BluetoothConnectionManager.isConnected) {
-            manuallyCheckForAudioSource()
-            return START_STICKY
-        }
-
         return START_STICKY
-    }
-
-    @Synchronized
-    fun manuallyCheckForAudioSource() {
-        val shouldResume = MediaController.getMusicActive() ?: false
-        if (earDetectNotif.status[0] != 0.toByte() && earDetectNotif.status[1] != 0.toByte()) {
-            disconnectAudio(shouldResume = shouldResume)
-        }
     }
 
     fun connect() {
@@ -1009,29 +979,6 @@ class PodsService :
                         val connectedDevices = proxy.connectedDevices
                         if (connectedDevices.contains(device)) {
                             serviceScope.launch { bluetoothSocketManager?.connectToSocket(device) }
-                        }
-                    }
-                    bluetoothAdapter.closeProfileProxy(profile, proxy)
-                }
-
-                override fun onServiceDisconnected(profile: Int) {}
-            },
-            BluetoothProfile.A2DP,
-        )
-    }
-
-    fun disconnect() {
-        val bluetoothAdapter = bluetoothAdapter ?: return
-        val currentDevice = currentDevice ?: return
-
-        bluetoothAdapter.getProfileProxy(
-            this,
-            object : BluetoothProfile.ServiceListener {
-                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    if (profile == BluetoothProfile.A2DP) {
-                        val connectedDevices = proxy.connectedDevices
-                        if (connectedDevices.contains(currentDevice)) {
-                            MediaController.sendPause()
                         }
                     }
                     bluetoothAdapter.closeProfileProxy(profile, proxy)
@@ -1098,63 +1045,13 @@ class PodsService :
         )
     }
 
-    @Synchronized
-    fun disconnectAudio(shouldResume: Boolean = false) {
+    private fun disconnectAudio() {
         val device = currentDevice ?: return
-        val bluetoothAdapter = bluetoothAdapter ?: return
-
-        bluetoothAdapter?.getProfileProxy(
-            this,
-            object : BluetoothProfile.ServiceListener {
-                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    if (profile == BluetoothProfile.A2DP) {
-                        try {
-                            if (
-                                proxy.getConnectionState(device) ==
-                                    BluetoothProfile.STATE_DISCONNECTED
-                            ) {
-                                return
-                            }
-                            device?.disconnect()
-                            if (shouldResume) {
-                                handler.postDelayed({ MediaController.sendPlay() }, 150)
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error disconnecting A2DP", e)
-                        } finally {
-                            bluetoothAdapter.closeProfileProxy(BluetoothProfile.A2DP, proxy)
-                        }
-                    }
-                }
-
-                override fun onServiceDisconnected(profile: Int) {
-                    Log.d(TAG, "A2DP service disconnected")
-                }
-            },
-            BluetoothProfile.A2DP,
-        )
-
-        bluetoothAdapter?.getProfileProxy(
-            this,
-            object : BluetoothProfile.ServiceListener {
-                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    if (profile == BluetoothProfile.HEADSET) {
-                        try {
-                            device?.disconnect()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error disconnecting HEADSET", e)
-                        } finally {
-                            bluetoothAdapter.closeProfileProxy(BluetoothProfile.HEADSET, proxy)
-                        }
-                    }
-                }
-
-                override fun onServiceDisconnected(profile: Int) {
-                    Log.d(TAG, "HEADSET service disconnected")
-                }
-            },
-            BluetoothProfile.HEADSET,
-        )
+        try {
+            device.disconnect()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error disconnecting audio profiles", e)
+        }
     }
 
     @Synchronized
@@ -1233,13 +1130,9 @@ class PodsService :
 
         bleManager?.stopScanning()
 
-        disconnectAudio()
-
-        stopAttManager()
         bluetoothSocketManager?.disconnect()
         gestureDetector?.release()
         inputManager = null
-        disconnect()
 
         config = null
         bluetoothSocketManager = null
