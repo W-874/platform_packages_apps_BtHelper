@@ -10,6 +10,7 @@ import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.ListPreference
 import androidx.preference.Preference
+import androidx.preference.SwitchPreferenceCompat
 import com.android.bluetooth.bthelper.Constants
 import com.android.bluetooth.bthelper.R
 import com.android.bluetooth.bthelper.isLowLatencySupported
@@ -58,17 +59,16 @@ class MainSettingsFragment : SettingsBasePreferenceFragment() {
     }
 
     private fun bindAccessoryOption(key: String) {
-        findPreference<ListPreference>(key)!!.setOnPreferenceChangeListener { _, value ->
+        findPreference<SwitchPreferenceCompat>(key)!!.setOnPreferenceChangeListener { _, value ->
             val state = AccessoryControls.state.value
             val address = requestedAddress()
-            val enabled = (value as? String)?.toBooleanStrictOrNull()
-            if (address != null && address == state.address && enabled != null && state.enables(key)) {
+            if (address != null && address == state.address && value is Boolean && state.enables(key)) {
                 val context = requireContext()
                 context.sendBroadcast(
                     Intent(Constants.ACTION_SET_ACCESSORY_OPTION).setPackage(context.packageName)
                         .putExtra(Constants.PARAM_MAC_ADDRESS, address)
                         .putExtra(Constants.EXTRA_OPTION_KEY, key)
-                        .putExtra(Constants.EXTRA_OPTION_ENABLED, enabled)
+                        .putExtra(Constants.EXTRA_OPTION_ENABLED, value)
                 )
             }
             false // Do not apply or persist the choice locally.
@@ -86,10 +86,10 @@ class MainSettingsFragment : SettingsBasePreferenceFragment() {
             when (pref.key) {
                 LISTENING_MODE -> updateListeningMode(pref as ListPreference, matchingState)
                 Constants.KEY_PERSONALIZED_VOLUME -> updateAccessoryOption(
-                    pref as ListPreference, matchingState, R.string.personalized_volume_summary
+                    pref as SwitchPreferenceCompat, matchingState, R.string.personalized_volume_summary
                 )
                 Constants.KEY_CONVERSATIONAL_AWARENESS -> updateAccessoryOption(
-                    pref as ListPreference, matchingState, R.string.conversational_awareness_summary
+                    pref as SwitchPreferenceCompat, matchingState, R.string.conversational_awareness_summary
                 )
                 else -> pref.isEnabled = matchingState?.enables(pref.key) == true
             }
@@ -108,15 +108,16 @@ class MainSettingsFragment : SettingsBasePreferenceFragment() {
     }
 
     private fun updateAccessoryOption(
-        pref: ListPreference, state: AccessoryControls.State?, description: Int
+        pref: SwitchPreferenceCompat, state: AccessoryControls.State?, description: Int
     ) {
         pref.isEnabled = state?.enables(pref.key) == true
-        pref.value = state?.setting(pref.key)?.toString()
-        pref.summary = getString(
-            R.string.accessory_option_summary,
-            getString(description),
-            pref.entry ?: getString(R.string.accessory_state_unknown)
-        )
+        val reported = state?.setting(pref.key)
+        pref.isChecked = reported == true
+        pref.summary = if (reported == null) {
+            getString(R.string.accessory_option_unknown, getString(description))
+        } else {
+            getString(description)
+        }
     }
 
     private companion object {

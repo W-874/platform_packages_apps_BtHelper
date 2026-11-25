@@ -19,15 +19,7 @@
         <item>Off</item><item>Noise cancellation</item><item>Transparency</item><item>Adaptive</item>
     </string-array>
     <string name="accessory_state_unknown">Unknown</string>
-    <string name="accessory_option_summary">%1$s\n%2$s</string>
-    <string-array name="accessory_option_labels">
-        <item>On</item>
-        <item>Off</item>
-    </string-array>
-    <string-array name="accessory_option_values" translatable="false">
-        <item>true</item>
-        <item>false</item>
-    </string-array>
+    <string name="accessory_option_unknown">%1$s\nThe headset has not reported its current setting.</string>
   
     <!-- Automatic ear detection -->
     <string name="automatic_ear_detection_title">Automatic ear detection</string>
