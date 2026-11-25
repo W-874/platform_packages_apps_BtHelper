@@ -24,6 +24,10 @@ in this Bluetooth tree already recognizes the AirPods SDP UUID, so do not apply
 the upstream generic L2CAP fallback patch. Settings and SystemUI consume the
 standard Bluetooth metadata and existing slice contract.
 
+BtHelper requests `LOCAL_MAC_ADDRESS` for AACP cross-device audio routing.
+It reads the adapter address only when routing needs it; a missing or redacted
+address does not prevent service startup or device metadata updates.
+
 ## Acknowledgements
 
 We would like to express our gratitude to the following projects:

@@ -35,7 +35,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.os.UserHandle
-import android.provider.Settings
 import android.telecom.TelecomManager
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
@@ -152,8 +151,6 @@ class PodsService :
             StemAction.defaultActions[StemPressType.LONG_PRESS]!!,
         var cameraAction: StemPressType? = null,
     )
-
-    private var localMac = ""
 
     private var config: ServiceConfig? = null
     private var bluetoothSocketManager: BluetoothSocketManager? = null
@@ -460,11 +457,14 @@ class PodsService :
         action?.let { executeStemAction(it) }
     }
 
+    private fun getLocalBluetoothAddress(): String? =
+        // The adapter returns this redacted address when access is denied.
+        bluetoothAdapter?.address?.takeIf { it != "02:00:00:00:00:00" }
+
     override fun onAudioSourceReceived(audioSource: ByteArray) {
-        if (
-            AACPManager.audioSource?.type != AACPManager.AudioSourceType.NONE &&
-                AACPManager.audioSource?.mac != localMac
-        ) {
+        val localMac = getLocalBluetoothAddress() ?: return
+        val source = AACPManager.audioSource ?: return
+        if (source.type != AACPManager.AudioSourceType.NONE && source.mac != localMac) {
             AACPManager.sendControlCommand(
                 AACPManager.ControlCommandIdentifiers.OWNS_CONNECTION.value,
                 byteArrayOf(0x00),
@@ -473,6 +473,7 @@ class PodsService :
     }
 
     override fun onConnectedDevicesReceived(connectedDevices: List<AACPManager.ConnectedDevice>) {
+        val localMac = getLocalBluetoothAddress() ?: return
         val newDevices =
             connectedDevices.filter { newDevice ->
                 val notInOld =
@@ -880,9 +881,6 @@ class PodsService :
 
     override fun onCreate() {
         super.onCreate()
-
-        localMac =
-            Settings.Secure.getString(this.contentResolver, Settings.Secure.BLUETOOTH_ADDRESS)
 
         sharedPreferences = getSharedPreferences()
         initializeConfig()
