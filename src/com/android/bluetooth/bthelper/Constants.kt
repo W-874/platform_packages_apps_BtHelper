@@ -236,6 +236,8 @@ fun Context.getSharedPreferences(): SharedPreferences {
         .getSharedPreferences(Constants.PREFERENCES_BTHELPER, Context.MODE_PRIVATE)
 }
 
+internal fun compatibleModelKey(address: String) = "${address}_pro2_compatible"
+
 fun SharedPreferences.setSingleDevice(single: Boolean) {
     this.edit()?.putBoolean(Constants.KEY_SINGLE_DEVICE, single)?.apply()
 }

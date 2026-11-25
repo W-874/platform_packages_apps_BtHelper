@@ -28,6 +28,37 @@ object AirPodsParser {
             AirPodsMaxUsbC(),
         )
 
+    private val modelsByNumber = buildMap {
+        for (model in models) {
+            val numbers = when (model) {
+                is RegularPods -> model.modelNumbers
+                is SinglePods -> model.modelNumbers
+                else -> continue
+            }
+            for (number in numbers) put(number, model)
+        }
+    }
+
+    // AACP 0x001D carries NUL-terminated service, device name, and model number fields.
+    internal fun parseDeviceInformation(packet: ByteArray): IPods? {
+        if (packet.size < 10 || packet[0] != 4.toByte() || packet[1] != 0.toByte() ||
+            packet[2] != 4.toByte() || packet[3] != 0.toByte() ||
+            packet[4] != 0x1d.toByte() || packet[5] != 0.toByte()
+        ) return null
+        val end = 9 + ((packet[7].toInt() and 0xff) or ((packet[8].toInt() and 0xff) shl 8))
+        if (end > packet.size) return null
+        var start = 9
+        repeat(2) {
+            while (start < end && packet[start] != 0.toByte()) start++
+            if (start == end) return null
+            start++
+        }
+        var modelEnd = start
+        while (modelEnd < end && packet[modelEnd] != 0.toByte()) modelEnd++
+        if (modelEnd == end || modelEnd == start) return null
+        return modelsByNumber[packet.decodeToString(start, modelEnd)]
+    }
+
     // The short (07 13) format carries full-percent levels in fixed L/R/case order.
     // Unlike 07 19, its private tail is not an AES block and does not report wear or lid state.
     internal fun parseShortProximityMessage(address: String, data: ByteArray): BLEManager.AirPodsStatus? {

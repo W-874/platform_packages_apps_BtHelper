@@ -58,6 +58,7 @@ import com.android.bluetooth.bthelper.Constants.EXTRA_HF_INDICATORS_IND_VALUE
 import com.android.bluetooth.bthelper.Constants.HF_INDICATOR_BATTERY_LEVEL_STATUS
 import com.android.bluetooth.bthelper.Constants.PACKAGE_ASI
 import com.android.bluetooth.bthelper.R
+import com.android.bluetooth.bthelper.compatibleModelKey
 import com.android.bluetooth.bthelper.getSharedPreferences
 import com.android.bluetooth.bthelper.getUriAllowlist
 import com.android.bluetooth.bthelper.isLowLatencySupported
@@ -66,6 +67,7 @@ import com.android.bluetooth.bthelper.utils.A2dpReceiver
 import com.android.bluetooth.bthelper.utils.AACPManager
 import com.android.bluetooth.bthelper.utils.AACPManager.StemPressType
 import com.android.bluetooth.bthelper.utils.AirPodsNotifications
+import com.android.bluetooth.bthelper.utils.AirPodsParser
 import com.android.bluetooth.bthelper.utils.BLEManager
 import com.android.bluetooth.bthelper.utils.BatteryStatus
 import com.android.bluetooth.bthelper.utils.BluetoothConnectionManager
@@ -79,6 +81,7 @@ import com.android.bluetooth.bthelper.utils.PodsA2dpListener
 import com.android.bluetooth.bthelper.utils.PodsUuidListener
 import com.android.bluetooth.bthelper.utils.StemAction
 import com.android.bluetooth.bthelper.utils.UuidReceiver
+import com.android.bluetooth.bthelper.utils.models.AirPodsPro2Compatible
 import com.android.bluetooth.bthelper.utils.models.IPods
 import com.android.bluetooth.bthelper.utils.models.RegularPods
 import com.android.bluetooth.bthelper.utils.models.RegularPodsMetadata
@@ -157,15 +160,15 @@ class PodsService :
     @Volatile private var isSliceSet = false
     private var publishedModel: IPods? = null
     private var reportedModel: IPods? = null
+    private var accessoryModel: IPods? = null
     private var hasSplitBattery = false
     private var hasAacpBattery = false
-    private var shortFormat = false
     @Volatile private var hasVerifiedModel = false
     private val hasStandardModel: Boolean
         get() = hasVerifiedModel && BluetoothConnectionManager.isConnected
     private val genericEarbuds = RegularPods()
     private val genericHeadphones = SinglePods()
-    private var publishedAsShort = false
+    private var publishedAsVerified = false
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var sharedPreferences: SharedPreferences? = null
@@ -243,7 +246,6 @@ class PodsService :
     private fun publishBleStatus(status: BLEManager.AirPodsStatus) {
         val device = currentDevice ?: return
         if (status.shortFormat && hasVerifiedModel) return
-        if (status.model != null || !status.shortFormat) shortFormat = status.shortFormat
         if (!status.shortFormat && status.model != null && !hasVerifiedModel) {
             reportedModel = status.model
             hasVerifiedModel = true
@@ -264,7 +266,7 @@ class PodsService :
                 caseCharging = status.isCaseCharging,
             )
         }
-        updatePodsStatus(device)
+        updatePodsStatus(device, publishBattery = true)
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -353,7 +355,7 @@ class PodsService :
         if (!batteryNotif.setBattery(batteryInfo)) return
         hasAacpBattery = true
         hasSplitBattery = hasSplitBattery || batteryNotif.hasSplitBattery
-        updatePodsStatus(device)
+        updatePodsStatus(device, publishBattery = true)
 
         // Battery reports are not evidence that this firmware supports audio routing.
         if (!hasStandardModel) return
@@ -499,7 +501,13 @@ class PodsService :
         }
     }
 
-    override fun onUnknownPacketReceived(packet: ByteArray) {}
+    @Synchronized
+    override fun onUnknownPacketReceived(packet: ByteArray) {
+        val device = currentDevice ?: return
+        if (hasVerifiedModel || accessoryModel != null) return
+        accessoryModel = AirPodsParser.parseDeviceInformation(packet) ?: return
+        updatePodsStatus(device)
+    }
 
     private fun getActionFor(bud: AACPManager.StemPressBudType, type: StemPressType): StemAction? {
         val config = config ?: return null
@@ -734,6 +742,11 @@ class PodsService :
 
     override fun onSharedPreferenceChanged(preferences: SharedPreferences?, key: String?) {
         if (preferences == null || key == null) return
+        val device = currentDevice
+        if (device != null && key == compatibleModelKey(device.address)) {
+            updatePodsStatus(device)
+            return
+        }
 
         val config = config ?: return
         when (key) {
@@ -1402,13 +1415,7 @@ class PodsService :
                 BluetoothDevice.METADATA_MAIN_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
             )
-        ret = setSinglePodsIconMetadata(device, metadata.drawable)
-        return ret
-    }
-
-    private fun setSinglePodsIconMetadata(device: BluetoothDevice, drawable: Int): Boolean {
-        var ret = device.setMetadataUri(BluetoothDevice.METADATA_MAIN_ICON, getIconUri(drawable))
-        return ret
+        return setRegularPodsIconMetadata(device, metadata.drawable, 0, 0, 0)
     }
 
     override fun onMetadataChanged(device: BluetoothDevice, key: Int, value: ByteArray?) {
@@ -1421,46 +1428,56 @@ class PodsService :
     // Set metadata (icon, battery, charging status, etc.) for current device
     // and send broadcast that device status has changed
     @Synchronized
-    private fun updatePodsStatus(device: BluetoothDevice) {
-        val model = reportedModel ?: when {
+    private fun updatePodsStatus(device: BluetoothDevice, publishBattery: Boolean = false) {
+        val model = if (hasVerifiedModel) reportedModel else accessoryModel ?: reportedModel
+        val presentation = model ?: when {
+            device.bondState == BluetoothDevice.BOND_BONDED &&
+                sharedPreferences?.getBoolean(compatibleModelKey(device.address), false) == true ->
+                AirPodsPro2Compatible
             hasSplitBattery -> genericEarbuds
             hasAacpBattery -> genericHeadphones
+            publishedModel === AirPodsPro2Compatible ||
+                (publishedModel == null && device.getMetadata(BluetoothDevice.METADATA_MODEL_NAME)
+                    ?.decodeToString() == AirPodsPro2Compatible.model) -> genericEarbuds
             else -> null
         }
         if (!isSliceSet) isSliceSet = setInitialMetadata(device)
-        if (model == null) return
+        if (presentation == null) return
 
-        if (publishedModel !== model || publishedAsShort != shortFormat) {
-            val manufacturer = if (shortFormat) genericEarbuds.manufacturer else model.manufacturer
-            val published = when (model) {
+        val verified = hasVerifiedModel
+        if (publishedModel !== presentation || publishedAsVerified != verified) {
+            val manufacturer = if (verified) presentation.manufacturer else genericEarbuds.manufacturer
+            val published = when (presentation) {
                 is RegularPods -> setRegularPodsMetadata(device, RegularPodsMetadata(
                     manufacturer = manufacturer,
-                    model = model.model,
-                    lowBattThreshold = model.lowBattThreshold,
-                    drawable = model.drawable,
-                    leftDrawable = model.leftDrawable,
-                    rightDrawable = model.rightDrawable,
-                    caseDrawable = model.caseDrawable,
+                    model = presentation.model,
+                    lowBattThreshold = presentation.lowBattThreshold,
+                    drawable = presentation.drawable,
+                    leftDrawable = presentation.leftDrawable,
+                    rightDrawable = presentation.rightDrawable,
+                    caseDrawable = presentation.caseDrawable,
                 ))
                 is SinglePods -> setSinglePodsMetadata(device, SinglePodsMetadata(
                     manufacturer = manufacturer,
-                    model = model.model,
-                    lowBattThreshold = model.lowBattThreshold,
-                    drawable = model.drawable,
+                    model = presentation.model,
+                    lowBattThreshold = presentation.lowBattThreshold,
+                    drawable = presentation.drawable,
                 ))
                 else -> false
             }
             if (published) {
-                publishedModel = model
-                publishedAsShort = shortFormat
-                getSharedPreferences().setSingleDevice(model.isSingle)
+                publishedModel = presentation
+                publishedAsVerified = verified
+                getSharedPreferences().setSingleDevice(presentation.isSingle)
             }
         }
+        if (!publishBattery) return
 
         val batteries = batteryNotif.getBattery()
         val batteryUnified: Int
         val chargingMain: Boolean
-        if (!model.isSingle) {
+        val splitBattery = reportedModel?.let { !it.isSingle } ?: hasSplitBattery
+        if (splitBattery) {
             val (left, right, case) = batteries
             val leftCharging = left.status == BatteryStatus.CHARGING
             val rightCharging = right.status == BatteryStatus.CHARGING

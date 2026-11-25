@@ -8,6 +8,8 @@
 <resources>
     <string name="settings_title">更多设置</string>
     <string name="more_settings_subtitle">相对音量、入耳检测等</string>
+    <string name="compatible_model_title">AirPods Pro 2 兼容型号</string>
+    <string name="compatible_model_summary">此已配对设备无法自动识别型号时，使用该型号和对应图标。</string>
     <string name="automatic_ear_detection_title">自动入耳检测</string>
     <string name="personalized_volume_title">个性化音量</string>
     <string name="personalized_volume_summary">根据周围环境调整媒体音量。</string>

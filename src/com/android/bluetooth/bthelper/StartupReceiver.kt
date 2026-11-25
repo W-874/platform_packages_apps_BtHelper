@@ -36,11 +36,23 @@ class StartupReceiver : BroadcastReceiver() {
             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
                 ?: return
 
+        if (action == BluetoothDevice.ACTION_BOND_STATE_CHANGED &&
+            intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR) ==
+                BluetoothDevice.BOND_NONE
+        ) {
+            val preferences = context.getSharedPreferences()
+            val key = compatibleModelKey(device.address)
+            if (preferences.contains(key) || preferences.contains("${device.address}_verified_proximity")) {
+                preferences.edit().remove(key).remove("${device.address}_verified_proximity").apply()
+            }
+            return
+        }
+
         onPodsDetected(context, intent, device)
     }
 
     private fun isPods(device: BluetoothDevice?): Boolean {
-        return device?.uuids?.contains(Constants.PODS_UUID) ?: false
+        return device?.uuids?.contains(Constants.PODS_UUID) == true
     }
 
     private fun onPodsDetected(context: Context, intent: Intent, device: BluetoothDevice) {
@@ -58,8 +70,9 @@ class StartupReceiver : BroadcastReceiver() {
             }
             BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
             BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
-                if (intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothAdapter.ERROR) ==
-                    BluetoothProfile.STATE_CONNECTED
+                if (device.bondState == BluetoothDevice.BOND_BONDED &&
+                    intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothAdapter.ERROR) ==
+                        BluetoothProfile.STATE_CONNECTED
                 ) {
                     maybeStartPodsService(context, device)
                 }

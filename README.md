@@ -47,6 +47,16 @@ For unrecognized earbuds, BtHelper leaves icon selection to Android, removing
 its own previously published icons without clearing third-party artwork or
 left/right/case battery metadata.
 
+When verified BLE is unavailable, the AACP device-information report (`0x001D`)
+can identify a known model and select its artwork. If there is no known model
+from AACP or BLE, open the paired device's **More settings** and enable
+**AirPods Pro 2 compatible** to select that artwork for this device only.
+If the headset is disconnected, the artwork updates on the next connection.
+Removing the bond deletes the selection. Neither an AACP model report nor
+this switch enables advanced controls or supplies battery readings.
+The device-information framing was cross-checked against
+[MagicPodsCore](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/watchers/AapFwInfoWatcher.h).
+
 The short format doesn't establish wear or lid state and doesn't enable advanced
 controls. No clone-specific command transport is implemented. The short-format
 layout was cross-checked against [librepods_ble's analysis](https://github.com/tree-sakura/librepods_ble/blob/8efbb74058763c113e570052aad5a645dec0c6eb/REVERSE_ANALYSIS.md);
