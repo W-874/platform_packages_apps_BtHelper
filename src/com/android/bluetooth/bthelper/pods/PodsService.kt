@@ -33,6 +33,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.ParcelUuid
 import android.os.SystemClock
 import android.os.UserHandle
 import android.telecom.TelecomManager
@@ -58,7 +59,6 @@ import com.android.bluetooth.bthelper.Constants.EXTRA_HF_INDICATORS_IND_VALUE
 import com.android.bluetooth.bthelper.Constants.HF_INDICATOR_BATTERY_LEVEL_STATUS
 import com.android.bluetooth.bthelper.Constants.PACKAGE_ASI
 import com.android.bluetooth.bthelper.R
-import com.android.bluetooth.bthelper.compatibleModelKey
 import com.android.bluetooth.bthelper.getSharedPreferences
 import com.android.bluetooth.bthelper.getUriAllowlist
 import com.android.bluetooth.bthelper.isLowLatencySupported
@@ -73,6 +73,8 @@ import com.android.bluetooth.bthelper.utils.BatteryStatus
 import com.android.bluetooth.bthelper.utils.BluetoothConnectionManager
 import com.android.bluetooth.bthelper.utils.BluetoothSocketManager
 import com.android.bluetooth.bthelper.utils.CameraStateMonitor
+import com.android.bluetooth.bthelper.utils.DeviceIdentificationSdp
+import com.android.bluetooth.bthelper.utils.DeviceInformationGatt
 import com.android.bluetooth.bthelper.utils.GestureDetector
 import com.android.bluetooth.bthelper.utils.HeadTracking
 import com.android.bluetooth.bthelper.utils.KeyStorageManager
@@ -81,7 +83,6 @@ import com.android.bluetooth.bthelper.utils.PodsA2dpListener
 import com.android.bluetooth.bthelper.utils.PodsUuidListener
 import com.android.bluetooth.bthelper.utils.StemAction
 import com.android.bluetooth.bthelper.utils.UuidReceiver
-import com.android.bluetooth.bthelper.utils.models.AirPodsPro2Compatible
 import com.android.bluetooth.bthelper.utils.models.IPods
 import com.android.bluetooth.bthelper.utils.models.RegularPods
 import com.android.bluetooth.bthelper.utils.models.RegularPodsMetadata
@@ -161,6 +162,20 @@ class PodsService :
     private var publishedModel: IPods? = null
     private var reportedModel: IPods? = null
     private var accessoryModel: IPods? = null
+    private var sdpModel: IPods? = null
+    private var gattModel: IPods? = null
+    private var deviceInformationGatt: DeviceInformationGatt? = null
+    private val sdpReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != DeviceIdentificationSdp.ACTION_RECORD ||
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_UUID, ParcelUuid::class.java) !=
+                    DeviceIdentificationSdp.uuid
+            ) return
+            val device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                ?: return
+            acceptSdpRecord(device, intent)
+        }
+    }
     private var hasSplitBattery = false
     private var hasAacpBattery = false
     @Volatile private var hasVerifiedModel = false
@@ -509,6 +524,38 @@ class PodsService :
         updatePodsStatus(device)
     }
 
+    @Synchronized
+    private fun acceptSdpRecord(device: BluetoothDevice, intent: Intent) {
+        if (currentDevice != device || device.bondState != BluetoothDevice.BOND_BONDED ||
+            hasVerifiedModel || sdpModel != null
+        ) return
+        val model = DeviceIdentificationSdp.model(intent)
+        if (model == null) {
+            maybeProbeGatt(device)
+            return
+        }
+        sdpModel = model
+        deviceInformationGatt?.close()
+        updatePodsStatus(device)
+    }
+
+    @Synchronized
+    private fun maybeProbeGatt(device: BluetoothDevice) {
+        if (deviceInformationGatt != null || hasVerifiedModel || sdpModel != null || accessoryModel != null) return
+        val probe = DeviceInformationGatt(this, handler, ::acceptGattModel)
+        deviceInformationGatt = probe
+        probe.probe(device)
+    }
+
+    @Synchronized
+    private fun acceptGattModel(device: BluetoothDevice, model: IPods) {
+        if (currentDevice != device || device.bondState != BluetoothDevice.BOND_BONDED ||
+            hasVerifiedModel || sdpModel != null || accessoryModel != null
+        ) return
+        gattModel = model
+        updatePodsStatus(device)
+    }
+
     private fun getActionFor(bud: AACPManager.StemPressBudType, type: StemPressType): StemAction? {
         val config = config ?: return null
         return when (type) {
@@ -742,12 +789,6 @@ class PodsService :
 
     override fun onSharedPreferenceChanged(preferences: SharedPreferences?, key: String?) {
         if (preferences == null || key == null) return
-        val device = currentDevice
-        if (device != null && key == compatibleModelKey(device.address)) {
-            updatePodsStatus(device)
-            return
-        }
-
         val config = config ?: return
         when (key) {
             Constants.KEY_PERSONALIZED_VOLUME -> {
@@ -938,6 +979,7 @@ class PodsService :
 
         registerReceiver(ancModeReceiver, ancModeFilter, RECEIVER_NOT_EXPORTED)
         registerReceiver(shutdownReceiver, shutdownFilter, RECEIVER_NOT_EXPORTED)
+        registerReceiver(sdpReceiver, IntentFilter(DeviceIdentificationSdp.ACTION_RECORD), RECEIVER_EXPORTED)
 
         bleManager = BLEManager(this, keyStorageManager!!)
         bleManager?.setAirPodsStatusListener(this)
@@ -959,6 +1001,7 @@ class PodsService :
             serviceScope.launch { bluetoothSocketManager?.connectToSocket(device) }
             connect()
             bleManager?.startScanning(device)
+            if (!DeviceIdentificationSdp.request(device)) maybeProbeGatt(device)
             return START_STICKY
         }
 
@@ -1154,6 +1197,8 @@ class PodsService :
 
         unregisterReceiver(shutdownReceiver)
         unregisterReceiver(ancModeReceiver)
+        unregisterReceiver(sdpReceiver)
+        deviceInformationGatt?.close()
 
         bleManager?.stopScanning()
 
@@ -1429,16 +1474,17 @@ class PodsService :
     // and send broadcast that device status has changed
     @Synchronized
     private fun updatePodsStatus(device: BluetoothDevice, publishBattery: Boolean = false) {
-        val model = if (hasVerifiedModel) reportedModel else accessoryModel ?: reportedModel
+        val model = if (hasVerifiedModel) {
+            reportedModel
+        } else {
+            sdpModel ?: accessoryModel ?: gattModel ?: reportedModel
+        }
         val presentation = model ?: when {
-            device.bondState == BluetoothDevice.BOND_BONDED &&
-                sharedPreferences?.getBoolean(compatibleModelKey(device.address), false) == true ->
-                AirPodsPro2Compatible
             hasSplitBattery -> genericEarbuds
             hasAacpBattery -> genericHeadphones
-            publishedModel === AirPodsPro2Compatible ||
-                (publishedModel == null && device.getMetadata(BluetoothDevice.METADATA_MODEL_NAME)
-                    ?.decodeToString() == AirPodsPro2Compatible.model) -> genericEarbuds
+            // Remove artwork left by the retired manual override when no model is known.
+            publishedModel == null && device.getMetadata(BluetoothDevice.METADATA_MODEL_NAME)
+                ?.decodeToString() == "AirPods Pro 2 Compatible" -> genericEarbuds
             else -> null
         }
         if (!isSliceSet) isSliceSet = setInitialMetadata(device)
@@ -1461,7 +1507,7 @@ class PodsService :
                     manufacturer = manufacturer,
                     model = presentation.model,
                     lowBattThreshold = presentation.lowBattThreshold,
-                    drawable = presentation.drawable,
+                    drawable = if (model == null) 0 else presentation.drawable,
                 ))
                 else -> false
             }

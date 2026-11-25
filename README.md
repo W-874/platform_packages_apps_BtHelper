@@ -47,15 +47,20 @@ For unrecognized earbuds, BtHelper leaves icon selection to Android, removing
 its own previously published icons without clearing third-party artwork or
 left/right/case battery metadata.
 
-When verified BLE is unavailable, the AACP device-information report (`0x001D`)
-can identify a known model and select its artwork. If there is no known model
-from AACP or BLE, open the paired device's **More settings** and enable
-**AirPods Pro 2 compatible** to select that artwork for this device only.
-If the headset is disconnected, the artwork updates on the next connection.
-Removing the bond deletes the selection. Neither an AACP model report nor
-this switch enables advanced controls or supplies battery readings.
-The device-information framing was cross-checked against
-[MagicPodsCore](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/watchers/AapFwInfoWatcher.h).
+Artwork uses the first known model in this order: IRK-verified BLE, the primary
+SDP Device Identification record (`0x1200`), AACP device information (`0x001D`),
+GATT Device Information Service PnP ID (`0x180A` / `0x2A50`), then identity-bound
+short BLE. Higher-priority evidence replaces lower-priority evidence, regardless
+of arrival order. SDP is queried once per session for a bonded headset declaring
+the AirPods service UUID, independently of the AACP socket. If SDP does not
+identify a model, GATT is read only on an existing LE link or when Android
+already knows the device exposes DIS. PnP IDs require the Bluetooth SIG vendor
+namespace and a known Apple product ID. These reports select artwork, not
+authenticity, battery readings, or advanced controls.
+
+The SDP product IDs and AACP framing were cross-checked against MagicPodsCore's
+[model table](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/enums/AapModelIds.h)
+and [device information parser](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/watchers/AapFwInfoWatcher.cpp).
 
 The short format doesn't establish wear or lid state and doesn't enable advanced
 controls. No clone-specific command transport is implemented. The short-format

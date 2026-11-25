@@ -14,8 +14,6 @@
     <!-- More settings title -->
     <string name="more_settings_title">@string/settings_title</string>
     <string name="more_settings_subtitle">Relative volume, ear detection, and more</string>
-    <string name="compatible_model_title">AirPods Pro 2 compatible</string>
-    <string name="compatible_model_summary">Use this model and its artwork when this paired device cannot be identified automatically.</string>
   
     <!-- Automatic ear detection -->
     <string name="automatic_ear_detection_title">Automatic ear detection</string>

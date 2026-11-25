@@ -39,6 +39,21 @@ object AirPodsParser {
         }
     }
 
+    internal fun modelFromPnpId(source: Int, vendor: Int, product: Int): IPods? {
+        // Product IDs are numeric in DIP/DIS; proximity packets present the bytes in reverse order.
+        if (source != 1 || vendor != 0x004c) return null
+        return models.firstOrNull {
+            (java.lang.Short.reverseBytes(it.modelId.toShort()).toInt() and 0xffff) == product
+        }
+    }
+
+    internal fun modelFromGattPnpId(value: ByteArray): IPods? {
+        if (value.size != 7) return null
+        val vendor = (value[1].toInt() and 0xff) or ((value[2].toInt() and 0xff) shl 8)
+        val product = (value[3].toInt() and 0xff) or ((value[4].toInt() and 0xff) shl 8)
+        return modelFromPnpId(value[0].toInt() and 0xff, vendor, product)
+    }
+
     // AACP 0x001D carries NUL-terminated service, device name, and model number fields.
     internal fun parseDeviceInformation(packet: ByteArray): IPods? {
         if (packet.size < 10 || packet[0] != 4.toByte() || packet[1] != 0.toByte() ||

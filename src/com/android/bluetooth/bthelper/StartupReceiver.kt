@@ -40,11 +40,7 @@ class StartupReceiver : BroadcastReceiver() {
             intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR) ==
                 BluetoothDevice.BOND_NONE
         ) {
-            val preferences = context.getSharedPreferences()
-            val key = compatibleModelKey(device.address)
-            if (preferences.contains(key) || preferences.contains("${device.address}_verified_proximity")) {
-                preferences.edit().remove(key).remove("${device.address}_verified_proximity").apply()
-            }
+            context.getSharedPreferences().edit().remove("${device.address}_verified_proximity").apply()
             return
         }
 
