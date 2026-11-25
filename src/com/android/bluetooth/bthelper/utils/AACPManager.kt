@@ -837,7 +837,7 @@ object AACPManager {
 
         companion object {
             fun fromByteArray(data: ByteArray): ControlCommand? {
-                if (data.size < 4) {
+                if (data.size < 7) {
                     return null
                 }
                 if (

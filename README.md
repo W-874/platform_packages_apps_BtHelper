@@ -58,6 +58,19 @@ already knows the device exposes DIS. PnP IDs require the Bluetooth SIG vendor
 namespace and a known Apple product ID. These reports select artwork, not
 authenticity, battery readings, or advanced controls.
 
+On a bonded headset exposing both the AirPods and Airoha service UUIDs, a valid
+split AACP battery report identifies compatible earbuds, not their retail SKU.
+An identity-bound `07 13 01 14 20` advertisement identifies the short-format
+Pro 2 variant ([CAPod factory](https://github.com/d4rken-org/capod/blob/d7817d713691fa7601256eef6bdbdcf2cf0e8426/app/src/main/java/eu/darken/capod/pods/core/apple/ble/devices/misc/FakeAirPodsPro2.kt)).
+
+More settings observes the current headset session. Valid reports on its secure
+AACP socket can enable wear detection, conversation settings or personalized
+volume separately. Listening modes are selectable only after the accessory has
+reported those modes, and the displayed mode follows its acknowledgement.
+Disconnecting discards socket-derived capabilities. To see the selected model,
+source and session state without logging addresses or keys, use
+`adb shell dumpsys activity service com.android.bluetooth.bthelper/.pods.PodsService`.
+
 The SDP product IDs and AACP framing were cross-checked against MagicPodsCore's
 [model table](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/enums/AapModelIds.h)
 and [device information parser](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/watchers/AapFwInfoWatcher.cpp).

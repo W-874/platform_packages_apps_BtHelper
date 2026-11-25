@@ -8,6 +8,10 @@
 <resources>
     <string name="settings_title">更多设置</string>
     <string name="more_settings_subtitle">相对音量、入耳检测等</string>
+    <string name="listening_mode_title">聆听模式</string>
+    <string-array name="listening_modes">
+        <item>关闭</item><item>降噪</item><item>通透</item><item>自适应</item>
+    </string-array>
     <string name="automatic_ear_detection_title">自动入耳检测</string>
     <string name="personalized_volume_title">个性化音量</string>
     <string name="personalized_volume_summary">根据周围环境调整媒体音量。</string>

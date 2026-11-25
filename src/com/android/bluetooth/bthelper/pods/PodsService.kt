@@ -94,7 +94,9 @@ import com.android.bluetooth.bthelper.utils.setMetadataString
 import com.android.bluetooth.bthelper.utils.setMetadataUri
 import com.android.bluetooth.bthelper.utils.setMetadataValue
 import java.io.File
+import java.io.FileDescriptor
 import java.io.FileOutputStream
+import java.io.PrintWriter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.io.encoding.Base64
@@ -178,9 +180,13 @@ class PodsService :
     }
     private var hasSplitBattery = false
     private var hasAacpBattery = false
+    private var airohaService = false
+    private val airohaEarbuds = object : RegularPods() {
+        override val model = "AirPods-compatible earbuds (Airoha)"
+    }
     @Volatile private var hasVerifiedModel = false
     private val hasStandardModel: Boolean
-        get() = hasVerifiedModel && BluetoothConnectionManager.isConnected
+        get() = hasVerifiedModel && !airohaService && BluetoothConnectionManager.isConnected
     private val genericEarbuds = RegularPods()
     private val genericHeadphones = SinglePods()
     private var publishedAsVerified = false
@@ -264,7 +270,7 @@ class PodsService :
         if (!status.shortFormat && status.model != null && !hasVerifiedModel) {
             reportedModel = status.model
             hasVerifiedModel = true
-            sharedPreferences?.edit { putBoolean("${device.address}_verified_proximity", true) }
+            if (!airohaService) AccessoryControls.verified(device.address)
             setupStemActions()
         } else {
             status.model?.let { reportedModel = it }
@@ -286,6 +292,22 @@ class PodsService :
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
+    }
+
+    @Synchronized
+    override fun dump(fd: FileDescriptor, writer: PrintWriter, args: Array<out String>) {
+        val source = when {
+            hasVerifiedModel -> "verified BLE"
+            sdpModel != null -> "SDP DIP"
+            accessoryModel != null -> "AACP device information"
+            gattModel != null -> "GATT DIS"
+            reportedModel != null -> "identity-bound short BLE"
+            publishedModel === airohaEarbuds -> "paired service UUIDs + AACP split battery"
+            else -> "unknown"
+        }
+        val controls = AccessoryControls.state.value
+        writer.println("Model: ${publishedModel?.model} (source=$source, Airoha service=$airohaService)")
+        writer.println("AACP connected=${controls.connected}, battery=$hasAacpBattery, wear=${controls.observed and AccessoryControls.WEAR != 0}, verified BLE=$hasVerifiedModel")
     }
 
     private fun handleCallStateChange(state: Int) {
@@ -387,12 +409,20 @@ class PodsService :
         }
     }
 
+    private fun observeControl(feature: Int): Boolean {
+        val device = currentDevice ?: return false
+        if (BluetoothConnectionManager.currentSocket?.remoteDevice != device) return false
+        AccessoryControls.observed(device.address, feature)
+        return AccessoryControls.state.value.allows(feature)
+    }
+
     override fun onEarDetectionReceived(earDetection: ByteArray) {
         processEarDetectionChange(earDetection)
     }
 
     override fun onConversationAwarenessReceived(conversationAwareness: ByteArray) {
-        if (!hasStandardModel) return
+        if (!conversAwareNotif.isConversationalAwarenessData(conversationAwareness)) return
+        if (!observeControl(AccessoryControls.CONVERSATION_EVENTS)) return
         conversAwareNotif.setData(conversationAwareness)
         if (conversAwareNotif.status == 1.toByte() || conversAwareNotif.status == 2.toByte()) {
             MediaController.startSpeaking()
@@ -405,10 +435,20 @@ class PodsService :
 
     override fun onControlCommandReceived(controlCommand: ByteArray) {
         val command = AACPManager.ControlCommand.fromByteArray(controlCommand) ?: return
+        if (command.value.size == 1 && command.value[0].toInt() in 1..2) {
+            when (command.identifier) {
+                AACPManager.ControlCommandIdentifiers.ADAPTIVE_VOLUME_CONFIG.value ->
+                    observeControl(AccessoryControls.PERSONAL_VOLUME)
+                AACPManager.ControlCommandIdentifiers.CONVERSATION_DETECT_CONFIG.value ->
+                    observeControl(AccessoryControls.CONVERSATION_CONFIG)
+            }
+        }
         if (command.identifier == AACPManager.ControlCommandIdentifiers.LISTENING_MODE.value) {
-            ancNotif.setStatus(
-                byteArrayOf(command.value.takeIf { it.isNotEmpty() }?.get(0) ?: 0x00.toByte())
-            )
+            val mode = command.value.singleOrNull()?.toInt() ?: return
+            val device = currentDevice ?: return
+            if (mode !in 1..4 || BluetoothConnectionManager.currentSocket?.remoteDevice != device) return
+            ancNotif.setStatus(command.value)
+            AccessoryControls.listeningMode(device.address, mode)
         }
     }
 
@@ -623,55 +663,32 @@ class PodsService :
     private fun processEarDetectionChange(earDetection: ByteArray) {
         if (!earDetectNotif.isEarDetectionData(earDetection)) return
         if (earDetection[6].toInt() !in 0..2 || earDetection[7].toInt() !in 0..2) return
-        if (!hasStandardModel) return
-        var inEar = false
-        var inEarData =
-            listOf(
-                earDetectNotif.status[0] == 0x00.toByte(),
-                earDetectNotif.status[1] == 0x00.toByte(),
-            )
-        var justEnabledA2dp = false
+        val firstReport = AccessoryControls.state.value.observed and AccessoryControls.WEAR == 0
+        if (!observeControl(AccessoryControls.WEAR)) return
+        val previous = earDetectNotif.status.count { it == 0.toByte() }
+        val worn = (if (earDetection[6] == 0.toByte()) 1 else 0) + (if (earDetection[7] == 0.toByte()) 1 else 0)
         earDetectNotif.setStatus(earDetection)
-        if (config?.earDetectionEnabled != true) return
+        if (config?.earDetectionEnabled != true || previous == worn || (firstReport && !hasStandardModel)) return
 
-        val data = earDetection.copyOfRange(earDetection.size - 2, earDetection.size)
-        inEar = data[0] == 0x00.toByte() && data[1] == 0x00.toByte()
-
-        val newInEarData = listOf(data[0] == 0x00.toByte(), data[1] == 0x00.toByte())
-
-        if (newInEarData.contains(true) && inEarData == listOf(false, false)) {
+        if (previous == 0 && worn > 0) {
             connectAudio()
-            justEnabledA2dp = true
             registerA2dpConnectionReceiver()
             if (MediaController.getMusicActive() == true) {
                 MediaController.userPlayedTheMedia = true
             }
-        } else if (newInEarData == listOf(false, false)) {
+        } else if (worn == 0) {
             MediaController.sendPause(force = true)
             if (config?.disconnectWhenNotWearing == true) {
                 disconnectAudio()
             }
         }
 
-        if (inEarData.contains(false) && newInEarData == listOf(true, true)) {
-            MediaController.userPlayedTheMedia = false
-        }
-
-        if (newInEarData.contains(false) && inEarData == listOf(true, true)) {
-            MediaController.userPlayedTheMedia = false
-        }
-
-        if (newInEarData.sorted() != inEarData.sorted()) {
-            inEarData = newInEarData
-            if (inEar == true) {
-                if (!justEnabledA2dp) {
-                    justEnabledA2dp = false
-                    MediaController.sendPlay()
-                    MediaController.userPausedTheMedia = false
-                }
-            } else {
-                MediaController.sendPause()
-            }
+        if (previous == 2 || worn == 2) MediaController.userPlayedTheMedia = false
+        if (worn == 2 && previous != 0) {
+            MediaController.sendPlay()
+            MediaController.userPausedTheMedia = false
+        } else if (worn == 1) {
+            MediaController.sendPause()
         }
     }
 
@@ -792,13 +809,13 @@ class PodsService :
         val config = config ?: return
         when (key) {
             Constants.KEY_PERSONALIZED_VOLUME -> {
-                if (hasStandardModel) AACPManager.sendControlCommand(
+                if (AccessoryControls.state.value.allows(AccessoryControls.PERSONAL_VOLUME)) AACPManager.sendControlCommand(
                     AACPManager.ControlCommandIdentifiers.ADAPTIVE_VOLUME_CONFIG.value,
                     preferences.getBoolean(key, false),
                 )
             }
             Constants.KEY_CONVERSATIONAL_AWARENESS -> {
-                if (hasStandardModel) AACPManager.sendControlCommand(
+                if (AccessoryControls.state.value.allows(AccessoryControls.CONVERSATION_CONFIG)) AACPManager.sendControlCommand(
                     AACPManager.ControlCommandIdentifiers.CONVERSATION_DETECT_CONFIG.value,
                     preferences.getBoolean(key, false),
                 )
@@ -900,10 +917,11 @@ class PodsService :
         object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action != Constants.ACTION_SET_ANC_MODE) return
-                if (!hasStandardModel) return
                 if (intent.hasExtra(Constants.EXTRA_MODE)) {
                     val mode = intent.getIntExtra(Constants.EXTRA_MODE, -1)
-                    if (mode in 1..4) {
+                    val state = AccessoryControls.state.value
+                    val address = intent.getStringExtra(Constants.PARAM_MAC_ADDRESS)
+                    if (state.address != null && address == state.address && state.reportedMode(mode)) {
                         AACPManager.sendControlCommand(
                             AACPManager.ControlCommandIdentifiers.LISTENING_MODE.value,
                             mode,
@@ -911,6 +929,7 @@ class PodsService :
                     }
                     return
                 }
+                if (!hasStandardModel) return
                 val currentMode = ancNotif.status
                 val allowOffModeValue =
                     AACPManager.controlCommandStatusList?.find {
@@ -975,6 +994,7 @@ class PodsService :
                 { startHeadTracking() },
                 { stopHeadTracking() },
                 { setupStemActions() },
+                { address, connected -> AccessoryControls.link(address, connected) },
             )
 
         registerReceiver(ancModeReceiver, ancModeFilter, RECEIVER_NOT_EXPORTED)
@@ -996,6 +1016,9 @@ class PodsService :
 
         if (currentDevice == null && intent?.action == Constants.ACTION_CONNECTED) {
             currentDevice = device
+            val services = device.uuids
+            airohaService = services != null && Constants.PODS_UUID in services && AIROHA_SERVICE in services
+            AccessoryControls.begin(device.address)
             updatePodsStatus(device)
             bluetoothAdapter?.addOnMetadataChangedListener(device, mainExecutor, this)
             serviceScope.launch { bluetoothSocketManager?.connectToSocket(device) }
@@ -1189,6 +1212,7 @@ class PodsService :
     }
 
     override fun onDestroy() {
+        currentDevice?.let { AccessoryControls.end(it.address) }
         sharedPreferences?.unregisterOnSharedPreferenceChangeListener(this)
 
         cameraStateMonitor?.unregisterListener(this)
@@ -1480,6 +1504,7 @@ class PodsService :
             sdpModel ?: accessoryModel ?: gattModel ?: reportedModel
         }
         val presentation = model ?: when {
+            airohaService && hasAacpBattery && hasSplitBattery -> airohaEarbuds
             hasSplitBattery -> genericEarbuds
             hasAacpBattery -> genericHeadphones
             // Remove artwork left by the retired manual override when no model is known.
@@ -1490,13 +1515,15 @@ class PodsService :
         if (!isSliceSet) isSliceSet = setInitialMetadata(device)
         if (presentation == null) return
 
-        val verified = hasVerifiedModel
+        val verified = hasVerifiedModel && !airohaService
         if (publishedModel !== presentation || publishedAsVerified != verified) {
             val manufacturer = if (verified) presentation.manufacturer else genericEarbuds.manufacturer
             val published = when (presentation) {
                 is RegularPods -> setRegularPodsMetadata(device, RegularPodsMetadata(
                     manufacturer = manufacturer,
-                    model = presentation.model,
+                    model = if (airohaService && model != null && presentation !is com.android.bluetooth.bthelper.utils.models.AirPodsPro2Clone) {
+                        "${presentation.model} (compatible)"
+                    } else presentation.model,
                     lowBattThreshold = presentation.lowBattThreshold,
                     drawable = presentation.drawable,
                     leftDrawable = presentation.leftDrawable,
@@ -1597,6 +1624,7 @@ class PodsService :
     }
 
     companion object {
+        private val AIROHA_SERVICE = ParcelUuid.fromString("00000000-0000-0000-0099-aabbccddeeff")
         const val TAG: String = "PodsService"
     }
 }

@@ -20,6 +20,7 @@ class BluetoothSocketManager(
     private val onIncomingCall: () -> Unit,
     private val onCallReceived: () -> Unit,
     private val onDeviceConnected: () -> Unit,
+    private val onLinkChanged: (String, Boolean) -> Unit,
 ) {
 
     private var currentSocket: BluetoothSocket? = null
@@ -51,6 +52,7 @@ class BluetoothSocketManager(
                 if (this@BluetoothSocketManager.currentSocket !== currentSocket) return@launch
                 BluetoothConnectionManager.currentSocket = currentSocket
                 BluetoothConnectionManager.isConnected = true
+                onLinkChanged(device.address, true)
             }
 
             AACPManager.sendPacket(AACPManager.createHandshakePacket())
@@ -80,7 +82,7 @@ class BluetoothSocketManager(
 
             try {
                 onDeviceConnected()
-                val buffer = ByteArray(1024)
+                val buffer = ByteArray(currentSocket.maxReceivePacketSize.coerceAtLeast(1024))
                 val input = currentSocket.inputStream
                 while (currentSocket.isConnected) {
                     val bytesRead = input.read(buffer)
@@ -112,6 +114,7 @@ class BluetoothSocketManager(
         socketJob = null
         BluetoothConnectionManager.currentSocket = null
         BluetoothConnectionManager.isConnected = false
+        onLinkChanged(socket.remoteDevice.address, false)
         try {
             socket.close()
         } catch (e: IOException) {

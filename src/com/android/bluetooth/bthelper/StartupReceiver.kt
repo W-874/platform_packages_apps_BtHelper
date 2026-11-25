@@ -17,6 +17,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.UserHandle
+import com.android.bluetooth.bthelper.pods.AccessoryControls
 import com.android.bluetooth.bthelper.pods.PodsService
 import com.android.bluetooth.bthelper.utils.BtActionsFilter
 
@@ -40,7 +41,7 @@ class StartupReceiver : BroadcastReceiver() {
             intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR) ==
                 BluetoothDevice.BOND_NONE
         ) {
-            context.getSharedPreferences().edit().remove("${device.address}_verified_proximity").apply()
+            if (device.address == AccessoryControls.state.value.address) maybeStopPodsService(context, device)
             return
         }
 

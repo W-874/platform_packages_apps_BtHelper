@@ -5,81 +5,77 @@
  */
 package com.android.bluetooth.bthelper.settings
 
-import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
+import androidx.preference.ListPreference
 import androidx.preference.Preference
-import androidx.preference.Preference.OnPreferenceChangeListener
-import androidx.preference.SwitchPreferenceCompat
 import com.android.bluetooth.bthelper.Constants
 import com.android.bluetooth.bthelper.R
-import com.android.bluetooth.bthelper.getSharedPreferences
 import com.android.bluetooth.bthelper.isLowLatencySupported
+import com.android.bluetooth.bthelper.pods.AccessoryControls
 import com.android.settingslib.widget.SettingsBasePreferenceFragment
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
-class MainSettingsFragment : SettingsBasePreferenceFragment(), OnPreferenceChangeListener {
+class MainSettingsFragment : SettingsBasePreferenceFragment() {
+    private var observation: Job? = null
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceManager.setStorageDeviceProtected()
         setPreferencesFromResource(R.xml.main_settings, rootKey)
 
-        val address = requireActivity().intent.data?.takeIf { it.isHierarchical }
-            ?.getQueryParameter(Constants.PARAM_MAC_ADDRESS)
-        if (address != null && BluetoothAdapter.checkBluetoothAddress(address) &&
-            !requireContext().getSharedPreferences().getBoolean("${address}_verified_proximity", false)
-        ) {
-            for (index in 0 until preferenceScreen.preferenceCount) {
-                preferenceScreen.getPreference(index).isEnabled = false
-            }
-            return
+        if (!requireContext().isLowLatencySupported()) {
+            findPreference<Preference>(Constants.KEY_LOW_LATENCY_AUDIO)?.let(preferenceScreen::removePreference)
         }
-
-        findPreference<SwitchPreferenceCompat>(Constants.KEY_AUTOMATIC_EAR_DETECTION)?.apply {
-            isEnabled = true
-            onPreferenceChangeListener = this@MainSettingsFragment
-        }
-
-        findPreference<SwitchPreferenceCompat>(Constants.KEY_CONVERSATIONAL_AWARENESS_PAUSE_MUSIC)
-            ?.apply {
-                isEnabled = true
-                onPreferenceChangeListener = this@MainSettingsFragment
+        findPreference<ListPreference>("listening_mode")!!.setOnPreferenceChangeListener { _, value ->
+            val state = AccessoryControls.state.value
+            val address = requestedAddress()
+            val mode = (value as? String)?.toIntOrNull()
+            if (address != null && address == state.address && mode != null && state.reportedMode(mode)) {
+                val context = requireContext()
+                context.sendBroadcast(Intent(Constants.ACTION_SET_ANC_MODE).setPackage(context.packageName)
+                    .putExtra(Constants.PARAM_MAC_ADDRESS, address).putExtra(Constants.EXTRA_MODE, mode))
             }
-
-        findPreference<SwitchPreferenceCompat>(
-                Constants.KEY_RELATIVE_CONVERSATIONAL_AWARENESS_VOLUME
-            )
-            ?.apply {
-                isEnabled = true
-                onPreferenceChangeListener = this@MainSettingsFragment
-            }
-
-        findPreference<SwitchPreferenceCompat>(Constants.KEY_HEAD_GESTURES)?.apply {
-            isEnabled = true
-            onPreferenceChangeListener = this@MainSettingsFragment
+            false // Show the new mode only when acknowledged by the headset.
         }
+        updateControls(AccessoryControls.state.value)
+    }
 
-        findPreference<SwitchPreferenceCompat>(Constants.KEY_DISCONNECT_WHEN_NOT_WEARING)?.apply {
-            isEnabled = true
-            onPreferenceChangeListener = this@MainSettingsFragment
-        }
-
-        findPreference<SwitchPreferenceCompat>(Constants.KEY_LOW_LATENCY_AUDIO)?.apply {
-            if (!requireContext().isLowLatencySupported()) {
-                preferenceScreen.removePreference(this)
-            } else {
-                isEnabled = true
-                onPreferenceChangeListener = this@MainSettingsFragment
-            }
+    override fun onStart() {
+        super.onStart()
+        observation = viewLifecycleOwner.lifecycleScope.launch {
+            AccessoryControls.state.collect { updateControls(it) }
         }
     }
 
-    override fun onPreferenceChange(preference: Preference, newValue: Any): Boolean {
-        when (preference.getKey()) {
-            else -> {}
-        }
-        return true
+    override fun onStop() {
+        observation?.cancel()
+        observation = null
+        super.onStop()
     }
 
-    companion object {
-        const val TAG: String = "MainSettingsFragment"
+    private fun requestedAddress() = requireActivity().intent.data?.takeIf { it.isHierarchical }
+        ?.getQueryParameter(Constants.PARAM_MAC_ADDRESS)
+
+    private fun updateControls(state: AccessoryControls.State) {
+        val address = requestedAddress()
+        for (i in 0 until preferenceScreen.preferenceCount) {
+            val pref = preferenceScreen.getPreference(i)
+            if (pref is ListPreference && pref.key == "listening_mode") {
+                pref.isVisible = address != null && address == state.address && state.reportedMode(state.mode)
+                if (pref.isVisible) {
+                    val labels = resources.getStringArray(R.array.listening_modes)
+                    val modes = (1..4).filter(state::reportedMode)
+                    pref.entries = modes.map { labels[it - 1] }.toTypedArray()
+                    pref.entryValues = modes.map { it.toString() }.toTypedArray()
+                    pref.value = state.mode.toString()
+                    pref.summary = labels[state.mode - 1]
+                    pref.isEnabled = modes.size > 1
+                }
+                continue
+            }
+            pref.isEnabled = state.address != null && state.address == address && state.enables(pref.key)
+        }
     }
 }
