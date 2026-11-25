@@ -10,7 +10,6 @@ package com.android.bluetooth.bthelper.utils
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import com.android.bluetooth.bthelper.Constants
-import com.android.bluetooth.bthelper.utils.models.IPods
 
 object BluetoothConnectionManager {
     // The platform factory exists at runtime but is absent from the Bluetooth compile stubs.
@@ -20,10 +19,6 @@ object BluetoothConnectionManager {
 
     internal fun createAirPodsSocket(device: BluetoothDevice): BluetoothSocket =
         createL2capSocket.invoke(device, Constants.AIRPODS_PSM) as BluetoothSocket
-
-    var currentModel: IPods? = null
-        @Synchronized get
-        @Synchronized set
 
     var currentSocket: BluetoothSocket? = null
         @Synchronized get

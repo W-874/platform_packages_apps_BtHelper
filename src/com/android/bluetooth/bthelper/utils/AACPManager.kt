@@ -198,7 +198,7 @@ object AACPManager {
     }
 
     fun parseProximityKeysResponse(data: ByteArray): Map<ProximityKeyType, ByteArray> {
-        if (data.size < 4) {
+        if (data.size < 7) {
             return emptyMap<ProximityKeyType, ByteArray>()
         }
         if (data[4] != Opcodes.PROXIMITY_KEYS_RSP) {
@@ -214,7 +214,7 @@ object AACPManager {
             val keyType = data[offset]
             val keyLength = data[offset + 2].toInt()
             offset += 4
-            if (offset + keyLength > data.size) {
+            if (keyLength != 16 || offset + keyLength > data.size) {
                 return emptyMap<ProximityKeyType, ByteArray>()
             }
             val key = ByteArray(keyLength)

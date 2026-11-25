@@ -32,6 +32,25 @@ Audio profile connection events start the service but do not trigger routing
 decisions. The classic ACL disconnect ends the session. BtHelper does not open
 a second ATT socket during the AACP handshake; no active feature uses it.
 
+### Compatibility telemetry
+
+The service is started by the existing bonded Bluetooth device identification
+path. The Adapter's More settings entry does not imply a successful AACP session.
+Apple manufacturer data with `07 13` and a 21-byte payload provides individual
+battery percentages and charging flags. It is accepted only for the active bonded
+headset's public address or its Android-resolved public identity. The standard
+`07 19` path continues to require the device's IRK; a short advertisement cannot
+authorize it. An advertised known model selects artwork, not authentication or
+control support. AACP battery reports can publish without a model; missing or
+invalid component readings are not converted to zero or an aggregate percentage.
+
+The short format doesn't establish wear or lid state and doesn't enable advanced
+controls. No clone-specific command transport is implemented. The short-format
+layout was cross-checked against [librepods_ble's analysis](https://github.com/tree-sakura/librepods_ble/blob/8efbb74058763c113e570052aad5a645dec0c6eb/REVERSE_ANALYSIS.md);
+[LightPods](https://github.com/uzairdeveloper223/LightPods/tree/2684bbb5e10b2ff647f9f4b4b4256d23f7b580fe)
+provided a reference for the separate nibble-based format. No HyperOS code or
+assets were imported.
+
 ## Acknowledgements
 
 We would like to express our gratitude to the following projects:

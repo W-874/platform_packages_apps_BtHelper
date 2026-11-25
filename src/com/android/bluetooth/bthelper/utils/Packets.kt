@@ -30,6 +30,7 @@ object BatteryStatus {
     const val CHARGING = 1
     const val NOT_CHARGING = 2
     const val DISCONNECTED = 4
+    const val CHARGING_OPTIMIZED = 5
 }
 
 data class Battery(val component: Int, val level: Int, val status: Int) : Parcelable {
@@ -165,12 +166,8 @@ class AirPodsNotifications {
                 BatteryStatus.DISCONNECTED,
             )
 
-        fun isBatteryData(data: ByteArray): Boolean {
-            if (data.size != 12 && data.size != 22) {
-                return false
-            }
-            return data.joinToString("") { "%02x".format(it) }.startsWith("040004000400")
-        }
+        var hasSplitBattery = false
+            private set
 
         fun setBatteryDirect(
             leftLevel: Int,
@@ -216,66 +213,54 @@ class AirPodsNotifications {
                 )
         }
 
-        fun setBattery(data: ByteArray) {
-            if (data.size == 12) {
-                headset =
-                    if (data[10].toInt() == BatteryStatus.DISCONNECTED) {
-                        Battery(headset.component, headset.level, BatteryStatus.DISCONNECTED)
+        fun setBattery(data: ByteArray): Boolean {
+            if (data.size < 12 || data[0] != 4.toByte() || data[1] != 0.toByte() ||
+                data[2] != 4.toByte() || data[3] != 0.toByte() || data[4] != 4.toByte() ||
+                data[5] != 0.toByte()
+            ) return false
+            val count = data[6].toInt()
+            if (count !in 1..3 || data.size != 7 + count * 5) return false
+
+            var components = 0
+            for (offset in 7 until data.size step 5) {
+                val component = data[offset].toInt()
+                val status = data[offset + 3].toInt()
+                if ((component != BatteryComponent.HEADSET && component != BatteryComponent.LEFT &&
+                        component != BatteryComponent.RIGHT && component != BatteryComponent.CASE) ||
+                    (components and component) != 0 ||
+                    (status != BatteryStatus.CHARGING && status != BatteryStatus.NOT_CHARGING &&
+                        status != BatteryStatus.DISCONNECTED && status != BatteryStatus.CHARGING_OPTIMIZED)
+                ) return false
+                components = components or component
+            }
+            if ((components and BatteryComponent.HEADSET) != 0 && count != 1) return false
+
+            for (offset in 7 until data.size step 5) {
+                val component = data[offset].toInt()
+                val level = data[offset + 2].toInt() and 0xFF
+                val status = data[offset + 3].toInt()
+                val reading = if (level > 100 || status == BatteryStatus.DISCONNECTED) {
+                    Battery(component, BluetoothDevice.BATTERY_LEVEL_UNKNOWN, BatteryStatus.DISCONNECTED)
+                } else {
+                    val chargeState = if (status == BatteryStatus.CHARGING_OPTIMIZED) {
+                        BatteryStatus.CHARGING
                     } else {
-                        Battery(headset.component, data[9].toInt(), data[10].toInt())
+                        status
                     }
-                return
+                    Battery(component, level, chargeState)
+                }
+                when (component) {
+                    BatteryComponent.LEFT -> first = reading
+                    BatteryComponent.RIGHT -> second = reading
+                    BatteryComponent.CASE -> case = reading
+                    BatteryComponent.HEADSET -> headset = reading
+                }
             }
-
-            if (data.size != 22) {
-                return
-            }
-            first =
-                if (data[10].toInt() == BatteryStatus.DISCONNECTED) {
-                    Battery(first.component, first.level, BatteryStatus.DISCONNECTED)
-                } else {
-                    Battery(data[7].toInt(), data[9].toInt(), data[10].toInt())
-                }
-            second =
-                if (data[15].toInt() == BatteryStatus.DISCONNECTED) {
-                    Battery(second.component, second.level, BatteryStatus.DISCONNECTED)
-                } else {
-                    Battery(data[12].toInt(), data[14].toInt(), data[15].toInt())
-                }
-            case =
-                if (
-                    data[20].toInt() == BatteryStatus.DISCONNECTED &&
-                        case.status != BatteryStatus.DISCONNECTED
-                ) {
-                    Battery(case.component, case.level, BatteryStatus.DISCONNECTED)
-                } else {
-                    Battery(data[17].toInt(), data[19].toInt(), data[20].toInt())
-                }
-
-            val unifiedLevel =
-                when {
-                    first.level != BluetoothDevice.BATTERY_LEVEL_UNKNOWN -> first.level
-                    second.level != BluetoothDevice.BATTERY_LEVEL_UNKNOWN -> second.level
-                    case.level != BluetoothDevice.BATTERY_LEVEL_UNKNOWN -> case.level
-                    else -> BluetoothDevice.BATTERY_LEVEL_UNKNOWN
-                }
-
-            val unifiedStatus =
-                when {
-                    first.status != BatteryStatus.DISCONNECTED -> first.status
-                    second.status != BatteryStatus.DISCONNECTED -> second.status
-                    case.status != BatteryStatus.DISCONNECTED -> case.status
-                    else -> BatteryStatus.DISCONNECTED
-                }
-
-            headset = Battery(headset.component, unifiedLevel, unifiedStatus)
+            hasSplitBattery = components != BatteryComponent.HEADSET
+            return true
         }
 
-        fun getBattery(): List<Battery> {
-            val left = if (first.component == BatteryComponent.LEFT) first else second
-            val right = if (first.component == BatteryComponent.LEFT) second else first
-            return listOf(left, right, case, headset)
-        }
+        fun getBattery(): List<Battery> = listOf(first, second, case, headset)
     }
 
     class ConversationalAwarenessNotification {

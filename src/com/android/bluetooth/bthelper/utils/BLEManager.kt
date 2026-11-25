@@ -47,11 +47,8 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
         val isHeadsetCharging: Boolean = false,
         val lidOpen: Boolean = false,
         val connectionState: String = Constants.STATE_UNKNOWN,
+        val shortFormat: Boolean = false,
     )
-
-    fun getMostRecentStatus(): AirPodsStatus {
-        return deviceStatusMap.values.maxByOrNull { it.lastSeen } ?: AirPodsStatus()
-    }
 
     interface AirPodsStatusListener {
         fun onDeviceStatusChanged(currStatus: AirPodsStatus, prevStatus: AirPodsStatus?)
@@ -74,6 +71,7 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
     private var currentGlobalLidState: Boolean? = null
     private var lastBroadcastTime: Long = 0
     private val processedAddresses = mutableSetOf<String>()
+    private var targetDevice: BluetoothDevice? = null
 
     private val cleanupHandler = Handler(Looper.getMainLooper())
     private val cleanupRunnable =
@@ -89,7 +87,8 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
         airPodsStatusListener = listener
     }
 
-    fun startScanning() {
+    fun startScanning(device: BluetoothDevice) {
+        targetDevice = device
         try {
             val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
             val btAdapter = btManager.adapter
@@ -115,31 +114,22 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
                     .setReportDelay(1)
                     .build()
 
-            val manufacturerData = ByteArray(27)
-            val manufacturerDataMask = ByteArray(27)
-
-            manufacturerData[0] = 7
-            manufacturerData[1] = 25
-
-            manufacturerDataMask[0] = -1
-            manufacturerDataMask[1] = -1
-
-            val scanFilter =
+            val scanFilters = listOf(0x19, 0x13).map { length ->
                 ScanFilter.Builder()
-                    .setManufacturerData(
-                        BluetoothAssignedNumbers.APPLE,
-                        manufacturerData,
-                        manufacturerDataMask,
-                    )
+                    .setManufacturerData(BluetoothAssignedNumbers.APPLE, byteArrayOf(0x07, length.toByte()))
                     .build()
+            }
 
             scanCallback =
                 object : ScanCallback() {
                     override fun onScanResult(callbackType: Int, result: ScanResult) {
+                        if (scanCallback !== this) return
+                        processedAddresses.clear()
                         processScanResult(result)
                     }
 
                     override fun onBatchScanResults(results: List<ScanResult>) {
+                        if (scanCallback !== this) return
                         processedAddresses.clear()
                         for (result in results) {
                             processScanResult(result)
@@ -149,13 +139,14 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
                     override fun onScanFailed(errorCode: Int) {}
                 }
 
-            bluetoothLeScanner?.startScan(listOf(scanFilter), scanSettings, scanCallback)
+            bluetoothLeScanner?.startScan(scanFilters, scanSettings, scanCallback)
 
             cleanupHandler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS)
         } catch (t: Throwable) {}
     }
 
     fun stopScanning() {
+        targetDevice = null
         try {
             if (bluetoothLeScanner != null && scanCallback != null) {
                 bluetoothLeScanner?.stopScan(scanCallback)
@@ -167,9 +158,10 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
     }
 
     @OptIn(ExperimentalEncodingApi::class)
-    private fun getKeyFromPreferences(type: AACPManager.ProximityKeyType): ByteArray? {
-        val encryptedKeyBase64 = sharedPreferences.getString(type.name + "_encrypted", null)
-        val ivBase64 = sharedPreferences.getString(type.name + "_iv", null)
+    private fun getKeyFromPreferences(address: String, type: AACPManager.ProximityKeyType): ByteArray? {
+        val prefix = "${address}_${type.name}"
+        val encryptedKeyBase64 = sharedPreferences.getString("${prefix}_encrypted", null)
+        val ivBase64 = sharedPreferences.getString("${prefix}_iv", null)
 
         if (encryptedKeyBase64 != null && ivBase64 != null) {
             return try {
@@ -200,12 +192,6 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
         }
     }
 
-    private fun formatBattery(byteVal: Int): Pair<Boolean, Int> {
-        val charging = (byteVal and 0x80) != 0
-        val level = byteVal and 0x7F
-        return Pair(charging, level)
-    }
-
     private fun processScanResult(result: ScanResult) {
         try {
             val scanRecord = result.scanRecord ?: return
@@ -215,11 +201,31 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
                 return
             }
 
-            val manufacturerData = scanRecord.getManufacturerSpecificData(76) ?: return
-            if (manufacturerData.size <= 20) return
+            val manufacturerData = scanRecord.getManufacturerSpecificData(BluetoothAssignedNumbers.APPLE) ?: return
+            val target = targetDevice ?: return
+            if (target.bondState != BluetoothDevice.BOND_BONDED) return
+
+            if (manufacturerData.size == 21) {
+                // Require a public match or an identity resolved by Android, never proximity or name.
+                val matches = if (result.device.addressType == BluetoothDevice.ADDRESS_TYPE_PUBLIC) {
+                    address == target.address
+                } else {
+                    val identity = result.device.identityAddressWithType
+                    identity.addressType == BluetoothDevice.ADDRESS_TYPE_PUBLIC &&
+                        identity.address == target.address
+                }
+                if (!matches) return
+                val status = AirPodsParser.parseShortProximityMessage(address, manufacturerData) ?: return
+                airPodsStatusListener?.onDeviceStatusChanged(status, null)
+                return
+            }
+
+            if (manufacturerData.size != 27 || manufacturerData[0] != 0x07.toByte() ||
+                manufacturerData[1] != 0x19.toByte() || manufacturerData[2] != 0x01.toByte()
+            ) return
 
             if (!verifiedAddresses.contains(address)) {
-                val irk = getKeyFromPreferences(AACPManager.ProximityKeyType.IRK)
+                val irk = getKeyFromPreferences(target.address, AACPManager.ProximityKeyType.IRK)
                 if (irk == null || !BluetoothCryptography.verifyRPA(address, irk)) {
                     return
                 }
@@ -229,7 +235,7 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
             processedAddresses.add(address)
             lastBroadcastTime = System.currentTimeMillis()
 
-            val encryptionKey = getKeyFromPreferences(AACPManager.ProximityKeyType.ENC_KEY)
+            val encryptionKey = getKeyFromPreferences(target.address, AACPManager.ProximityKeyType.ENC_KEY)
             val decryptedData =
                 if (encryptionKey != null) decryptLastBytes(manufacturerData, encryptionKey)
                 else null
@@ -249,6 +255,7 @@ class BLEManager(private val context: Context, private val keyStorageManager: Ke
 
             airPodsStatusListener?.let { listener ->
                 if (previousStatus == null) {
+                    listener.onDeviceStatusChanged(parsedStatus, null)
                     listener.onBroadcastFromNewAddress(parsedStatus)
 
                     if (

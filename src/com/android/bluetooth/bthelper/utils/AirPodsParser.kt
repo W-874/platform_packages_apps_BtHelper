@@ -28,6 +28,32 @@ object AirPodsParser {
             AirPodsMaxUsbC(),
         )
 
+    // The short (07 13) format carries full-percent levels in fixed L/R/case order.
+    // Unlike 07 19, its private tail is not an AES block and does not report wear or lid state.
+    internal fun parseShortProximityMessage(address: String, data: ByteArray): BLEManager.AirPodsStatus? {
+        if (data.size != 21 || data[0] != 0x07.toByte() || data[1] != 0x13.toByte() ||
+            data[2] != 0x01.toByte()
+        ) return null
+
+        val modelId = ((data[3].toInt() and 0xFF) shl 8) or (data[4].toInt() and 0xFF)
+        val left = data[12].toInt() and 0x7F
+        val right = data[13].toInt() and 0x7F
+        val case = data[14].toInt() and 0x7F
+        fun level(value: Int) = if (value <= 100) value else BluetoothDevice.BATTERY_LEVEL_UNKNOWN
+        return BLEManager.AirPodsStatus(
+            address = address,
+            paired = true,
+            model = getModel(modelId, data[9].toInt() and 0xFF),
+            leftBattery = level(left),
+            rightBattery = level(right),
+            caseBattery = level(case),
+            isLeftCharging = left <= 100 && data[12] < 0,
+            isRightCharging = right <= 100 && data[13] < 0,
+            isCaseCharging = case <= 100 && data[14] < 0,
+            shortFormat = true,
+        )
+    }
+
     fun parseProximityMessage(address: String, data: ByteArray): BLEManager.AirPodsStatus {
         val paired = data[2].toInt() == 1
 

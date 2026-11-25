@@ -55,10 +55,9 @@ class BtHelperSliceProvider : SliceProvider() {
         val title = context.getString(R.string.more_settings_title)
         val subtitle = context.getString(R.string.more_settings_subtitle)
         // Settings resolves the explicit activity from the PendingIntent for two-pane layouts.
-        val intent = Intent(Intent.ACTION_MAIN).setClassName(
-            Constants.AUTHORITY_BTHELPER,
-            Constants.ACTIVITY_BTHELPER_MAIN_SETTINGS,
-        )
+        val intent = Intent(Intent.ACTION_MAIN)
+            .setClassName(Constants.AUTHORITY_BTHELPER, Constants.ACTIVITY_BTHELPER_MAIN_SETTINGS)
+            .setData(sliceUri)
         val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         val icon = IconCompat.createWithResource(context, R.drawable.ic_chevron_right)
         val action = SliceAction(pendingIntent, icon.toIcon(), title)

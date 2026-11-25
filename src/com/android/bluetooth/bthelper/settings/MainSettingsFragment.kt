@@ -5,6 +5,7 @@
  */
 package com.android.bluetooth.bthelper.settings
 
+import android.bluetooth.BluetoothAdapter
 import android.os.Bundle
 import android.view.View
 import androidx.preference.Preference
@@ -12,6 +13,7 @@ import androidx.preference.Preference.OnPreferenceChangeListener
 import androidx.preference.SwitchPreferenceCompat
 import com.android.bluetooth.bthelper.Constants
 import com.android.bluetooth.bthelper.R
+import com.android.bluetooth.bthelper.getSharedPreferences
 import com.android.bluetooth.bthelper.isLowLatencySupported
 import com.android.settingslib.widget.SettingsBasePreferenceFragment
 
@@ -25,6 +27,17 @@ class MainSettingsFragment : SettingsBasePreferenceFragment(), OnPreferenceChang
         super.onViewCreated(view, savedInstanceState)
 
         preferenceManager.setStorageDeviceProtected()
+
+        val address = requireActivity().intent.data?.takeIf { it.isHierarchical }
+            ?.getQueryParameter(Constants.PARAM_MAC_ADDRESS)
+        if (address != null && BluetoothAdapter.checkBluetoothAddress(address) &&
+            !requireContext().getSharedPreferences().getBoolean("${address}_verified_proximity", false)
+        ) {
+            for (index in 0 until preferenceScreen.preferenceCount) {
+                preferenceScreen.getPreference(index).isEnabled = false
+            }
+            return
+        }
 
         findPreference<SwitchPreferenceCompat>(Constants.KEY_AUTOMATIC_EAR_DETECTION)?.apply {
             isEnabled = true
