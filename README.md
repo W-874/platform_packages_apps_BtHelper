@@ -11,8 +11,8 @@ Only Apple AirPods series are supported by this project.<br>
 
 ## uwuAOSP Android 17
 
-The local manifest pins the Parasite `main` base and the `uwu-17.0` topic carries
-the Android 17 adaptation. `vendor/uwu/config/common.mk` includes `BtHelper`;
+The local manifest tracks the downstream `uwu-17.0` branch, which carries the
+Android 17 adaptation. `vendor/uwu/config/common.mk` includes `BtHelper`;
 Soong also installs the required `BtHelperAdapter` and permission grants on
 `system_ext`. Use the normal product build and OTA packaging flow.
 
@@ -37,12 +37,9 @@ We would like to express our gratitude to the following projects:
 <b>Trademark Notice:</b><br>
 The term "AirPods" is a registered trademark of Apple Inc.<br>
 
-The original upstream graphics in `res-apple` are Apple assets. The upstream
-audio in that directory also has no asset-specific redistribution terms. The
-Android 17 build excludes `res-apple`; it uses original vector icons and
-platform-generated gesture feedback instead. Preserve this distinction when
-providing GPL corresponding source for the APK: do not redistribute the
-excluded assets without permission.
+BtHelper packages the upstream AirPods artwork and the gesture feedback sounds
+used at runtime from `res-apple`. The artwork belongs to Apple Inc.; the
+project's GPL does not grant redistribution rights to these third-party assets.
 
 ## License
 

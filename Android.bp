@@ -44,7 +44,7 @@ android_app {
         "SettingsLibSettingsTheme",
     ],
 
-    resource_dirs: ["res"],
+    resource_dirs: ["res", "res-apple"],
 
     required: [
         "BtHelperAdapter",

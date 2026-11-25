@@ -895,7 +895,7 @@ class PodsService :
         MediaController.onCreate(this)
 
         inputManager = getSystemService(Context.INPUT_SERVICE) as InputManager
-        gestureDetector = GestureDetector { stopHeadTracking() }
+        gestureDetector = GestureDetector(this) { stopHeadTracking() }
 
         telecomManager = getSystemService(TELECOM_SERVICE) as TelecomManager
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager

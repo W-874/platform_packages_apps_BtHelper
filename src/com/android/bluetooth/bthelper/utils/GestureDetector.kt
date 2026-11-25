@@ -9,6 +9,7 @@
 
 package com.android.bluetooth.bthelper.utils
 
+import android.content.Context
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,8 +18,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class GestureDetector(private val stopHeadTracking: () -> Unit) {
-    private val audio = GestureFeedback()
+class GestureDetector(context: Context, private val stopHeadTracking: () -> Unit) {
+    private val audio = GestureFeedback(context)
     private val gestureProcessor = GestureProcessor()
 
     private var isRunning = false
