@@ -9,7 +9,7 @@ package com.android.bluetooth.bthelper.utils.models
 
 import com.android.bluetooth.bthelper.Constants.Icons
 
-class AirPodsPro2 : RegularPods() {
+open class AirPodsPro2 : RegularPods() {
     override val modelId: Int
         get() = 0x1420
 

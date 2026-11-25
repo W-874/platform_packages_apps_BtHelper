@@ -5,23 +5,12 @@
  */
 package com.android.bluetooth.bthelper.utils.models
 
-import com.android.bluetooth.bthelper.Constants.Icons
+internal class AirPodsPro2Clone : AirPodsPro2() {
+    override val manufacturer: String
+        get() = Constants.UNKNOWN
 
-internal class AirPodsPro2Clone : RegularPods() {
-    override val modelId: Int
-        get() = 0x1420
-
-    override val drawable: Int
-        get() = Icons.AirPods_Pro
-
-    override val leftDrawable: Int
-        get() = Icons.AirPods_Pro_Left
-
-    override val rightDrawable: Int
-        get() = Icons.AirPods_Pro_Right
-
-    override val caseDrawable: Int
-        get() = Icons.AirPods_Pro_Case
+    override val modelNumbers: List<String>
+        get() = emptyList()
 
     override val model: String
         get() = "AirPods Pro 2 Clone"

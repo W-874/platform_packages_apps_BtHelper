@@ -187,10 +187,9 @@ class PodsService :
         override val model = "AirPods-compatible earbuds (Airoha)"
     }
     @Volatile private var hasVerifiedModel = false
-    @Volatile private var standardProfile = false
     private val hasStandardModel: Boolean
-        get() = standardProfile && BluetoothConnectionManager.isConnected
-    private var profileModel: IPods? = null
+        get() = profileModel != null && BluetoothConnectionManager.isConnected
+    @Volatile private var profileModel: IPods? = null
     private val genericEarbuds = RegularPods()
     private val genericHeadphones = SinglePods()
     private var publishedAsVerified = false
@@ -1490,8 +1489,7 @@ class PodsService :
         }
         if (model !== profileModel) {
             profileModel = model
-            standardProfile = model != null && !airohaService && model !is AirPodsPro2Clone
-            AccessoryControls.declare(device.address, AccessoryControls.profile(model, airohaService))
+            AccessoryControls.declare(device.address, AccessoryControls.profile(model))
             if (hasStandardModel) setupStemActions()
         }
         val presentation = model ?: when {
@@ -1512,7 +1510,7 @@ class PodsService :
             val published = when (presentation) {
                 is RegularPods -> setRegularPodsMetadata(device, RegularPodsMetadata(
                     manufacturer = manufacturer,
-                    model = if (airohaService && model != null && presentation !is com.android.bluetooth.bthelper.utils.models.AirPodsPro2Clone) {
+                    model = if (airohaService && model != null && presentation !is AirPodsPro2Clone) {
                         "${presentation.model} (compatible)"
                     } else presentation.model,
                     lowBattThreshold = presentation.lowBattThreshold,

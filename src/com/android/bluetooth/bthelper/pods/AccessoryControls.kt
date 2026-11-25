@@ -5,9 +5,6 @@ import android.content.SharedPreferences
 import com.android.bluetooth.bthelper.Constants
 import com.android.bluetooth.bthelper.utils.models.AirPodsMax
 import com.android.bluetooth.bthelper.utils.models.AirPodsMaxUsbC
-import com.android.bluetooth.bthelper.utils.models.AirPodsPro2
-import com.android.bluetooth.bthelper.utils.models.AirPodsPro2Clone
-import com.android.bluetooth.bthelper.utils.models.AirPodsPro2UsbC
 import com.android.bluetooth.bthelper.utils.models.Constants.Capability
 import com.android.bluetooth.bthelper.utils.models.IPods
 import com.android.bluetooth.bthelper.utils.models.RegularPods
@@ -26,12 +23,7 @@ internal object AccessoryControls {
     private const val BASIC_MODES = OFF or (OFF shl 1) or (OFF shl 2)
     private const val ADAPTIVE = OFF shl 3
 
-    fun profile(model: IPods?, airoha: Boolean): Int {
-        if (model == null) return 0
-        if (model is AirPodsPro2Clone || airoha) {
-            return if (model is AirPodsPro2Clone || model is AirPodsPro2 || model is AirPodsPro2UsbC)
-                WEAR or BASIC_MODES else 0
-        }
+    fun profile(model: IPods?): Int {
         val caps = when (model) {
             is RegularPods -> model.capabilities
             is SinglePods -> model.capabilities

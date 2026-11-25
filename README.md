@@ -64,15 +64,14 @@ An identity-bound `07 13 01 14 20` advertisement identifies the short-format
 Pro 2 variant ([CAPod factory](https://github.com/d4rken-org/capod/blob/d7817d713691fa7601256eef6bdbdcf2cf0e8426/app/src/main/java/eu/darken/capod/pods/core/apple/ble/devices/misc/FakeAirPodsPro2.kt)).
 
 On a bonded AACP connection, More settings offers controls from the identified
-model's feature table. Pro 2 earbuds using the Airoha service have a separate
-compatibility profile: Off, ANC and Transparency are selectable before the
-first mode report. Optional features are not inherited from the Apple PID alone.
+model's feature table. A headset identifying as Pro 2 uses the full Pro 2
+control profile, including when it also exposes the Airoha service. The current
+value of a setting can be unknown without preventing the user from changing it.
 The host subscribes for status and requests wear state during initialization.
 A control write requests a status refresh; a successful socket write never
 changes the displayed setting. Disconnecting clears the current values. Valid
 peer reports can also establish capabilities, which survive reconnects and are
-forgotten on unpairing. For protocol details see [LibrePods control commands](https://github.com/librepods-org/librepods/blob/89356c08cea3db0b6b54792d9329d09a87cc85fa/docs/control_commands.md)
-and the [1562AE compatibility profile](https://help.magicpods.app/headphones/airoha-airpodspro-1562ae/).
+forgotten on unpairing. For protocol details see [LibrePods control commands](https://github.com/librepods-org/librepods/blob/89356c08cea3db0b6b54792d9329d09a87cc85fa/docs/control_commands.md).
 To inspect the selected model, source and live session without exposing keys:
 `adb shell dumpsys activity service com.android.bluetooth.bthelper/.pods.PodsService`.
 
