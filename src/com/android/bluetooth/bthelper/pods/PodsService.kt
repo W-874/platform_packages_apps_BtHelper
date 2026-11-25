@@ -895,7 +895,7 @@ class PodsService :
         MediaController.onCreate(this)
 
         inputManager = getSystemService(Context.INPUT_SERVICE) as InputManager
-        gestureDetector = GestureDetector(this) { stopHeadTracking() }
+        gestureDetector = GestureDetector { stopHeadTracking() }
 
         telecomManager = getSystemService(TELECOM_SERVICE) as TelecomManager
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
@@ -1239,7 +1239,7 @@ class PodsService :
 
         stopAttManager()
         bluetoothSocketManager?.disconnect()
-        gestureDetector?.stopDetection()
+        gestureDetector?.release()
         inputManager = null
         disconnect()
 
@@ -1398,7 +1398,7 @@ class PodsService :
                 putExtra(Constants.EXTRA_METADATA_KEY, key)
                 setPackage(Constants.PACKAGE_BTHELPER_ADAPTER)
             }
-        sendBroadcastAsUser(sliceIntent, UserHandle.ALL)
+        sendBroadcast(sliceIntent)
     }
 
     private fun setRegularPodsMetadata(

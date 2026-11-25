@@ -9,9 +9,7 @@ package com.android.bluetooth.bthelper.utils
 
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
-import android.os.ParcelUuid
 import android.util.Log
-import com.android.bluetooth.bthelper.Constants
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.LinkedBlockingQueue
@@ -19,9 +17,6 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 /* This is a very basic ATT (Attribute Protocol) implementation. I have only implemented
  * what is necessary for LibrePods to function, i.e. reading and writing characteristics,
@@ -58,20 +53,14 @@ class ATTManager(private val serviceScope: CoroutineScope) {
     // queue for non-notification PDUs (responses to requests)
     private val responses = LinkedBlockingQueue<ByteArray>()
 
-    init {
-        HiddenApiBypass.addHiddenApiExemptions(Constants.HIDDEN_API_BLUETOOTH_SOCKET)
-    }
-
     @Synchronized
     fun connectToSocket(device: BluetoothDevice?) {
         if (device == null) return
         if (BluetoothConnectionManager.isAttConnected) return
 
-        val uuid = ParcelUuid.fromString("00000000-0000-0000-0000-000000000000")
-
         currentSocket =
             try {
-                createBluetoothSocket(device, uuid) ?: return
+                BluetoothConnectionManager.createAirPodsSocket(device)
             } catch (e: Exception) {
                 Log.e(TAG, "Error creating bluetooth socket", e)
                 return
@@ -79,14 +68,16 @@ class ATTManager(private val serviceScope: CoroutineScope) {
 
         val currentSocket = this.currentSocket ?: return
 
-        runBlocking {
-            withTimeout(5000L) {
-                currentSocket.connect()
-                input = currentSocket.inputStream
-                output = currentSocket.outputStream
-                BluetoothConnectionManager.isAttConnected = true
-                BluetoothConnectionManager.currentAttSocket = currentSocket
-            }
+        try {
+            currentSocket.connect()
+            input = currentSocket.inputStream
+            output = currentSocket.outputStream
+            BluetoothConnectionManager.isAttConnected = true
+            BluetoothConnectionManager.currentAttSocket = currentSocket
+        } catch (e: java.io.IOException) {
+            Log.w(TAG, "ATT connection unavailable", e)
+            disconnect()
+            return
         }
 
         notificationJob =
@@ -117,12 +108,22 @@ class ATTManager(private val serviceScope: CoroutineScope) {
 
     @Synchronized
     fun disconnect() {
+        val socket = currentSocket
+        currentSocket = null
+        notificationJob?.cancel()
+        notificationJob = null
+        input = null
+        output = null
+        responses.clear()
+        if (BluetoothConnectionManager.currentAttSocket === socket) {
+            BluetoothConnectionManager.isAttConnected = false
+            BluetoothConnectionManager.currentAttSocket = null
+        }
         try {
-            notificationJob?.cancel()
-            notificationJob = null
-            currentSocket?.close()
-            currentSocket = null
-        } catch (e: Exception) {}
+            socket?.close()
+        } catch (e: java.io.IOException) {
+            Log.w(TAG, "Error closing ATT socket", e)
+        }
     }
 
     fun registerListener(handle: ATTHandles, listener: (ByteArray) -> Unit) {
@@ -190,28 +191,6 @@ class ATTManager(private val serviceScope: CoroutineScope) {
             return resp.copyOfRange(1, resp.size)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-        }
-        return null
-    }
-
-    @Synchronized
-    private fun createBluetoothSocket(device: BluetoothDevice, uuid: ParcelUuid): BluetoothSocket? {
-        val type = 3 // L2CAP
-        val constructorSpecs =
-            listOf(
-                arrayOf(device, type, true, true, 0x1001, uuid),
-                arrayOf(device, type, 1, true, true, 0x1001, uuid),
-                arrayOf(type, 1, true, true, device, 0x1001, uuid),
-                arrayOf(type, true, true, device, 0x1001, uuid),
-            )
-
-        for ((index, params) in constructorSpecs.withIndex()) {
-            try {
-                return HiddenApiBypass.newInstance(BluetoothSocket::class.java, *params)
-                    as BluetoothSocket
-            } catch (e: Exception) {
-                Log.e(TAG, "Error creating bluetooth socket with constructor $index", e)
-            }
         }
         return null
     }

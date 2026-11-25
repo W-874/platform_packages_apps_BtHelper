@@ -6,10 +6,11 @@
 -->
 <exceptions>
     <exception package="com.android.bluetooth.bthelper">
-        <permission name="android.permission.BLUETOOTH" fixed="false"/>
-        <permission name="android.permission.BLUETOOTH_ADMIN" fixed="false"/>
-        <permission name="android.permission.BLUETOOTH_ADVERTISE" fixed="false"/>
         <permission name="android.permission.BLUETOOTH_CONNECT" fixed="false"/>
         <permission name="android.permission.BLUETOOTH_SCAN" fixed="false"/>
+        <permission name="android.permission.READ_PHONE_STATE" fixed="false"/>
+    </exception>
+    <exception package="com.android.bluetooth.bthelper.adapter">
+        <permission name="android.permission.BLUETOOTH_CONNECT" fixed="false"/>
     </exception>
 </exceptions>

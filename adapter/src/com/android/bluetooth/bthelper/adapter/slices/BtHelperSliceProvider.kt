@@ -5,13 +5,17 @@
  */
 package com.android.bluetooth.bthelper.adapter.slices
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.res.TypedArray
 import android.net.Uri
 import android.util.Log
+import androidx.core.graphics.drawable.IconCompat
 import androidx.slice.Slice
 import androidx.slice.SliceProvider
 import androidx.slice.builders.ListBuilder
+import androidx.slice.builders.SliceAction
 import com.android.bluetooth.bthelper.adapter.Constants
 import com.android.bluetooth.bthelper.adapter.R
 
@@ -48,23 +52,23 @@ class BtHelperSliceProvider : SliceProvider() {
 
         if (context == null) return null
 
-        val MORE_SETTINGS_TITLE: String = context.getString(R.string.more_settings_title)
-        val MORE_SETTINGS_SUBTITLE: String = context.getString(R.string.more_settings_subtitle)
+        val title = context.getString(R.string.more_settings_title)
+        val subtitle = context.getString(R.string.more_settings_subtitle)
+        // Settings resolves the explicit activity from the PendingIntent for two-pane layouts.
+        val intent = Intent(Intent.ACTION_MAIN).setClassName(
+            Constants.AUTHORITY_BTHELPER,
+            Constants.ACTIVITY_BTHELPER_MAIN_SETTINGS,
+        )
+        val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        val icon = IconCompat.createWithResource(context, R.drawable.ic_chevron_right)
+        val action = SliceAction(pendingIntent, icon.toIcon(), title)
 
-        val listBuilder: ListBuilder = ListBuilder(context, sliceUri, INFINITY)
-
+        val listBuilder = ListBuilder(context, sliceUri, INFINITY)
         listBuilder.addRow(
-            SliceCreator(
-                    R.drawable.ic_chevron_right,
-                    MORE_SETTINGS_TITLE,
-                    MORE_SETTINGS_SUBTITLE,
-                    false,
-                    Constants.ACTION_PENDING_INTENT,
-                    Constants.EXTRA_NONE,
-                    context,
-                    Constants.SLICE_MAIN,
-                )
-                .getSettingRow(sliceUri)
+            ListBuilder.RowBuilder(sliceUri)
+                .setTitle(title)
+                .setSubtitle(subtitle)
+                .setPrimaryAction(action)
         )
 
         listBuilder.setAccentColor(getColorAccentDefaultColor(context))

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#F1F4F6"
+        android:strokeColor="#56616C"
+        android:strokeWidth="0.85"
+        android:pathData="M12.3,3.1 C8.7,2.7 5.7,5 5.8,8.2 C5.9,10.8 8.4,12.3 11.1,12.5 L11.5,17.9 Q11.7,20.1 13.5,20 Q15.3,19.9 15.3,18 L15.6,11.8 Q18.4,10.4 18.4,8 Q18.4,4.1 12.3,3.1 Z" />
+    <path
+        android:fillColor="#414B54"
+        android:pathData="M8.2,6.3 Q9.5,5.3 11.2,5.8 Q12.2,6.1 11.8,7 Q11.5,7.7 10.6,7.4 Q9.7,7.2 8.9,7.8 Q8.2,8.3 7.8,7.6 Q7.3,6.9 8.2,6.3 Z" />
+</vector>

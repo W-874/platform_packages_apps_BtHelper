@@ -25,10 +25,6 @@
         android:tag="BtHelper"
         android:label="@string/app_name" />
 
-    <uses-permission android:name="android.permission.BATTERY_STATS"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED" />
     <uses-permission
@@ -36,17 +32,14 @@
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" />
-    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" />
-    <uses-permission android:name="android.permission.UPDATE_DEVICE_STATS" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.MODIFY_PHONE_STATE" />
-    <uses-permission android:name="android.permission.LOCAL_MAC_ADDRESS" />
-    <uses-permission android:name="android.permission.DEVICE_POWER" />
     <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
+    <!-- The configured camera shutter action emits only KEYCODE_CAMERA. -->
+    <uses-permission android:name="android.permission.INJECT_EVENTS" />
+    <uses-permission android:name="com.android.bluetooth.bthelper.adapter.permission.SET_SLICE" />
 
     <protected-broadcast android:name="batterywidget.impl.action.update_bluetooth_data" />
 
@@ -54,7 +47,6 @@
     <protected-broadcast android:name="com.android.bluetooth.bthelper.DISCONNECTED" />
     <protected-broadcast android:name="com.android.bluetooth.bthelper.NAME_CHANGED" />
     <protected-broadcast android:name="com.android.bluetooth.bthelper.SET_ANC_MODE" />
-    <protected-broadcast android:name="com.android.bluetooth.bthelper.SET_SLICE" />
 
     <uses-feature
         android:name="android.hardware.bluetooth_le"
@@ -97,29 +89,23 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".settings.MainSettingsFragment"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.android.bluetooth.bthelper.ACTION_PENDING_INTENT" />
-            </intent-filter>
-        </activity>
-
         <!-- AirPods services -->
         <service
             android:name=".pods.PodsService"
             android:enabled="true"
-            android:exported="true" />
+            android:exported="false" />
 
         <receiver
             android:name=".StartupReceiver"
             android:enabled="true"
             android:exported="true"
+            android:permission="android.permission.BLUETOOTH_PRIVILEGED"
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.bluetooth.a2dp.profile.action.ACTIVE_DEVICE_CHANGED" />
                 <action android:name="android.bluetooth.a2dp.profile.action.AVRCP_CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.a2dp.profile.action.CODEC_CONFIG_CHANGED" />
+                <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.a2dp.profile.action.PLAYING_STATE_CHANGED" />
                 <action android:name="android.bluetooth.adapter.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.adapter.action.STATE_CHANGED" />

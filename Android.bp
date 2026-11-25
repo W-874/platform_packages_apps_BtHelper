@@ -4,6 +4,17 @@
 // License-Filename: LICENSE
 //
 
+package {
+    default_applicable_licenses: ["BtHelper_license"],
+}
+
+license {
+    name: "BtHelper_license",
+    visibility: [":__subpackages__"],
+    license_kinds: ["SPDX-license-identifier-GPL-3.0-or-later"],
+    license_text: ["LICENSE"],
+}
+
 android_app {
     name: "BtHelper",
     defaults: [
@@ -27,21 +38,17 @@ android_app {
         "androidx.slice_slice-builders",
         "kotlin-stdlib",
         "kotlin-stdlib-jdk7",
-        "PlatformComposeCore",
+        "androidx.compose.runtime_runtime",
+        "kotlinx_coroutines_android",
         "SettingsLib",
         "SettingsLibSettingsTheme",
-        "custom-sdk_org.lsposed.hiddenapibypass_hiddenapibypass",
     ],
 
-    resource_dirs: [
-        "res",
-        "res-apple",
-    ],
+    resource_dirs: ["res"],
 
     required: [
         "BtHelperAdapter",
         "default-permissions_com.android.bluetooth.bthelper",
-        "hidden-api-whitelist_com.android.bluetooth.bthelper",
     ],
 
     optimize: {
@@ -60,14 +67,6 @@ prebuilt_etc {
     name: "default-permissions_com.android.bluetooth.bthelper",
     relative_install_path: "default-permissions",
     src: "default-permissions_com.android.bluetooth.bthelper.xml",
-    filename_from_src: true,
-    system_ext_specific: true,
-}
-
-prebuilt_etc {
-    name: "hidden-api-whitelist_com.android.bluetooth.bthelper",
-    relative_install_path: "sysconfig",
-    src: "hidden-api-whitelist_com.android.bluetooth.bthelper.xml",
     filename_from_src: true,
     system_ext_specific: true,
 }

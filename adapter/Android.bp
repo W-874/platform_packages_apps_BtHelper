@@ -4,6 +4,10 @@
 // License-Filename: LICENSE
 //
 
+package {
+    default_applicable_licenses: ["BtHelper_license"],
+}
+
 android_app {
     name: "BtHelperAdapter",
     defaults: [
@@ -44,4 +48,5 @@ android_app {
 
     system_ext_specific: true,
     privileged: true,
+    privapp_allowlist: "privapp_whitelist_com.android.bluetooth.bthelper.adapter.xml",
 }

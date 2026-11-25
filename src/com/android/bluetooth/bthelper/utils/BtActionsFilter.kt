@@ -29,6 +29,7 @@ object BtActionsFilter {
         btActions.add(BluetoothA2dp.ACTION_ACTIVE_DEVICE_CHANGED)
         btActions.add(Constants.ACTION_AVRCP_CONNECTION_STATE_CHANGED)
         btActions.add(BluetoothA2dp.ACTION_CODEC_CONFIG_CHANGED)
+        btActions.add(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
         btActions.add(BluetoothA2dp.ACTION_PLAYING_STATE_CHANGED)
         btActions.add(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED)
         btActions.add(BluetoothAdapter.ACTION_STATE_CHANGED)

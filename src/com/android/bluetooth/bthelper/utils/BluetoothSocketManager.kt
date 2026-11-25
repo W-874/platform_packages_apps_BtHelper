@@ -8,18 +8,12 @@ package com.android.bluetooth.bthelper.utils
 
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
-import android.os.Handler
-import android.os.Looper
-import android.os.ParcelUuid
 import android.util.Log
-import com.android.bluetooth.bthelper.Constants
+import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 class BluetoothSocketManager(
     private val serviceScope: CoroutineScope,
@@ -33,20 +27,14 @@ class BluetoothSocketManager(
     private var currentSocket: BluetoothSocket? = null
     private var socketJob: Job? = null
 
-    init {
-        HiddenApiBypass.addHiddenApiExemptions(Constants.HIDDEN_API_BLUETOOTH_SOCKET)
-    }
-
     @Synchronized
     fun connectToSocket(device: BluetoothDevice?) {
         if (device == null) return
-        if (BluetoothConnectionManager.isConnected) return
-
-        val uuid: ParcelUuid = Constants.PODS_UUID
+        if (currentSocket != null) return
 
         currentSocket =
             try {
-                createBluetoothSocket(device, uuid) ?: return
+                BluetoothConnectionManager.createAirPodsSocket(device)
             } catch (e: Exception) {
                 Log.e(TAG, "Error creating bluetooth socket", e)
                 return
@@ -55,14 +43,9 @@ class BluetoothSocketManager(
         val currentSocket = this.currentSocket ?: return
 
         try {
-            runBlocking {
-                withTimeout(5000L) {
-                    currentSocket.connect()
-                    BluetoothConnectionManager.isConnected = true
-                    BluetoothConnectionManager.currentSocket = currentSocket
-                    onSocketOpened(device)
-                }
-            }
+            currentSocket.connect()
+            BluetoothConnectionManager.isConnected = true
+            BluetoothConnectionManager.currentSocket = currentSocket
 
             AACPManager.sendPacket(AACPManager.createHandshakePacket())
             AACPManager.sendSetFeatureFlagsPacket()
@@ -72,6 +55,7 @@ class BluetoothSocketManager(
                         AACPManager.ProximityKeyType.ENC_KEY.value)
                     .toByte()
             )
+            onSocketOpened(device)
 
             socketJob =
                 serviceScope.launch {
@@ -88,83 +72,61 @@ class BluetoothSocketManager(
                     )
                     onIncomingCall()
 
-                    Handler(Looper.getMainLooper())
-                        .postDelayed(
-                            {
-                                AACPManager.sendPacket(AACPManager.createHandshakePacket())
-                                AACPManager.sendSetFeatureFlagsPacket()
-                                AACPManager.sendNotificationRequest()
-                                AACPManager.sendRequestProximityKeys(
-                                    AACPManager.ProximityKeyType.IRK.value
-                                )
-                                onCallReceived()
-                            },
-                            5000,
-                        )
+                    val repeatHandshake = launch {
+                        delay(5000)
+                        AACPManager.sendPacket(AACPManager.createHandshakePacket())
+                        AACPManager.sendSetFeatureFlagsPacket()
+                        AACPManager.sendNotificationRequest()
+                        AACPManager.sendRequestProximityKeys(AACPManager.ProximityKeyType.IRK.value)
+                        onCallReceived()
+                    }
 
                     onDeviceConnected()
 
-                    while (currentSocket.isConnected) {
-                        try {
-                            val buffer = ByteArray(1024)
-                            val bytesRead = currentSocket.inputStream.read(buffer)
+                    val buffer = ByteArray(1024)
+                    val input = currentSocket.inputStream
+                    try {
+                        while (currentSocket.isConnected) {
+                            val bytesRead = input.read(buffer)
+                            if (bytesRead < 0) break
                             if (bytesRead > 0) {
-                                val data = buffer.copyOfRange(0, bytesRead)
-                                AACPManager.receivePacket(data)
-                            } else if (bytesRead == -1) {
-                                currentSocket.close()
-                                break
+                                AACPManager.receivePacket(buffer.copyOf(bytesRead))
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error reading from socket", e)
-                            currentSocket.close()
-                            break
                         }
+                    } catch (e: IOException) {
+                        if (currentSocket.isConnected) Log.w(TAG, "AACP read failed", e)
+                    } finally {
+                        repeatHandshake.cancel()
                     }
                 }
+            socketJob?.invokeOnCompletion { closeSocket(currentSocket) }
         } catch (e: Exception) {
             Log.e(TAG, "Error connecting to socket", e)
-            try {
-                currentSocket.close()
-            } catch (closeException: Exception) {
-                Log.e(TAG, "Error closing socket", closeException)
-            }
-        } finally {
-            onSocketClosed()
+            closeSocket(currentSocket)
         }
-    }
-
-    @Synchronized
-    private fun createBluetoothSocket(device: BluetoothDevice, uuid: ParcelUuid): BluetoothSocket? {
-        val type = 3 // L2CAP
-        val constructorSpecs =
-            listOf(
-                arrayOf(device, type, true, true, 0x1001, uuid),
-                arrayOf(device, type, 1, true, true, 0x1001, uuid),
-                arrayOf(type, 1, true, true, device, 0x1001, uuid),
-                arrayOf(type, true, true, device, 0x1001, uuid),
-            )
-
-        for ((index, params) in constructorSpecs.withIndex()) {
-            try {
-                return HiddenApiBypass.newInstance(BluetoothSocket::class.java, *params)
-                    as BluetoothSocket
-            } catch (e: Exception) {
-                Log.e(TAG, "Error creating bluetooth socket with constructor $index", e)
-            }
-        }
-        return null
     }
 
     @Synchronized
     fun disconnect() {
+        val socket = currentSocket ?: return
+        val job = socketJob
+        closeSocket(socket)
+        job?.cancel()
+    }
+
+    @Synchronized
+    private fun closeSocket(socket: BluetoothSocket) {
+        if (currentSocket !== socket) return
+        currentSocket = null
+        socketJob = null
+        BluetoothConnectionManager.currentSocket = null
+        BluetoothConnectionManager.isConnected = false
         try {
-            socketJob?.cancel()
-            socketJob = null
-            currentSocket?.close()
-            currentSocket = null
-        } catch (e: Exception) {
+            socket.close()
+        } catch (e: IOException) {
             Log.e(TAG, "Error closing socket", e)
+        } finally {
+            onSocketClosed()
         }
     }
 

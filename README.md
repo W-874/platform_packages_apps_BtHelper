@@ -9,22 +9,20 @@ These features are not currently supported by AOSP.<br>
 
 Only Apple AirPods series are supported by this project.<br>
 
-## Requirements
+## uwuAOSP Android 17
 
-This project depends on AOSP components.<br>
-You need to add these commits to corresponding repositories.
+The local manifest pins the Parasite `main` base and the `uwu-17.0` topic carries
+the Android 17 adaptation. `vendor/uwu/config/common.mk` includes `BtHelper`;
+Soong also installs the required `BtHelperAdapter` and permission grants on
+`system_ext`. Use the normal product build and OTA packaging flow.
 
-* packages/modules/Bluetooth:
-  * [l2cap: Use basic mode for edge case devices](https://github.com/TheParasiteProject/packages_modules_Bluetooth/commit/15355234accd0bb1a90c09fa61b8de6f5ec1f292)
-* vendor repository (e.g. vendor/aosp): [vendor: config: common: Build BtHelper](https://github.com/TheParasiteProject/vendor_aosp/commit/424bca6b12a9f1d5fd56374ba6ae4310ea98cde3)
-
-After that clone this repo:<br>
-```bash
-git clone https://github.com/TheParasiteProject/packages_apps_BtHelper packages/apps/BtHelper
-```
-
-Finally, build your AOSP.<br>
-BtHelper will be installed as system application.
+Both APKs use the platform certificate and separate application UIDs. AACP and
+ATT use the platform's hidden BR/EDR L2CAP factory via one scoped method lookup
+because the factory is absent from the Bluetooth compile stubs. No per-package
+hidden API exemption is needed for platform-signed apps. `l2c_should_skip_ertm`
+in this Bluetooth tree already recognizes the AirPods SDP UUID, so do not apply
+the upstream generic L2CAP fallback patch. Settings and SystemUI consume the
+standard Bluetooth metadata and existing slice contract.
 
 ## Acknowledgements
 
@@ -39,11 +37,15 @@ We would like to express our gratitude to the following projects:
 <b>Trademark Notice:</b><br>
 The term "AirPods" is a registered trademark of Apple Inc.<br>
 
-<b>Ownership of Image Assets:</b><br>
-The image assets located in the "res-apple" folder within this repository are the property of Apple Inc.<br>
+The original upstream graphics in `res-apple` are Apple assets. The upstream
+audio in that directory also has no asset-specific redistribution terms. The
+Android 17 build excludes `res-apple`; it uses original vector icons and
+platform-generated gesture feedback instead. Preserve this distinction when
+providing GPL corresponding source for the APK: do not redistribute the
+excluded assets without permission.
 
 ## License
 
-Bluetooth Devices Helper is licensed under the [GNU General Public License v3.0](LICENSE.md).
+Bluetooth Devices Helper is licensed under the [GNU General Public License v3.0 or later](LICENSE).
 <br>
 Copyright (C) 2023-2025 TheParasiteProject
