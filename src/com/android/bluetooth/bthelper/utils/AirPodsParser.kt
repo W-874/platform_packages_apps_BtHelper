@@ -28,6 +28,8 @@ object AirPodsParser {
             AirPodsMaxUsbC(),
         )
 
+    private val shortPro2Clone = AirPodsPro2Clone()
+
     private val modelsByNumber = buildMap {
         for (model in models) {
             val numbers = when (model) {
@@ -75,13 +77,16 @@ object AirPodsParser {
     }
 
     // The short (07 13) format carries full-percent levels in fixed L/R/case order.
-    // Unlike 07 19, its private tail is not an AES block and does not report wear or lid state.
+    // Do not interpret its tail as an AES block or use its public fields for wear/lid events.
     internal fun parseShortProximityMessage(address: String, data: ByteArray): BLEManager.AirPodsStatus? {
         if (data.size != 21 || data[0] != 0x07.toByte() || data[1] != 0x13.toByte() ||
             data[2] != 0x01.toByte()
         ) return null
 
         val modelId = ((data[3].toInt() and 0xFF) shl 8) or (data[4].toInt() and 0xFF)
+        // CAPod's FakeAirPodsPro2 factory (d7817d7) distinguishes 0x1420 by the 19-byte
+        // payload length. Other short model IDs have no confirmed model mapping.
+        val model = shortPro2Clone.takeIf { it.modelId == modelId }
         val left = data[12].toInt() and 0x7F
         val right = data[13].toInt() and 0x7F
         val case = data[14].toInt() and 0x7F
@@ -89,7 +94,7 @@ object AirPodsParser {
         return BLEManager.AirPodsStatus(
             address = address,
             paired = true,
-            model = getModel(modelId, data[9].toInt() and 0xFF),
+            model = model,
             leftBattery = level(left),
             rightBattery = level(right),
             caseBattery = level(case),
