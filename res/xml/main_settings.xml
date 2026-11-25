@@ -18,17 +18,19 @@
         android:defaultValue="true"
         android:title="@string/automatic_ear_detection_title" />
 
-    <SwitchPreferenceCompat
+    <ListPreference
         android:key="personalized_volume"
-        android:defaultValue="false"
-        android:title="@string/personalized_volume_title" 
-        android:summary="@string/personalized_volume_summary" />
+        android:persistent="false"
+        android:entries="@array/accessory_option_labels"
+        android:entryValues="@array/accessory_option_values"
+        android:title="@string/personalized_volume_title" />
 
-    <SwitchPreferenceCompat
+    <ListPreference
         android:key="conversational_awareness"
-        android:defaultValue="false"
-        android:title="@string/conversational_awareness_title" 
-        android:summary="@string/conversational_awareness_summary" />
+        android:persistent="false"
+        android:entries="@array/accessory_option_labels"
+        android:entryValues="@array/accessory_option_values"
+        android:title="@string/conversational_awareness_title" />
 
     <SwitchPreferenceCompat
         android:key="conversational_awareness_pause_music"

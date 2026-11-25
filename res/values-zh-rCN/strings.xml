@@ -12,6 +12,12 @@
     <string-array name="listening_modes">
         <item>关闭</item><item>降噪</item><item>通透</item><item>自适应</item>
     </string-array>
+    <string name="accessory_state_unknown">未知</string>
+    <string name="accessory_option_summary">%1$s\n%2$s</string>
+    <string-array name="accessory_option_labels">
+        <item>开启</item>
+        <item>关闭</item>
+    </string-array>
     <string name="automatic_ear_detection_title">自动入耳检测</string>
     <string name="personalized_volume_title">个性化音量</string>
     <string name="personalized_volume_summary">根据周围环境调整媒体音量。</string>

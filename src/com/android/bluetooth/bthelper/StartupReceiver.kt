@@ -42,6 +42,7 @@ class StartupReceiver : BroadcastReceiver() {
                 BluetoothDevice.BOND_NONE
         ) {
             if (device.address == AccessoryControls.state.value.address) maybeStopPodsService(context, device)
+            AccessoryControls.forget(device.address, context.getSharedPreferences())
             return
         }
 

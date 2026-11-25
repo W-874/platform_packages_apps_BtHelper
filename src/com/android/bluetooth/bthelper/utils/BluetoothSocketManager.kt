@@ -62,16 +62,19 @@ class BluetoothSocketManager(
                     AACPManager.ProximityKeyType.ENC_KEY.value).toByte()
             AACPManager.sendRequestProximityKeys(keyTypes)
 
-            AACPManager.sendPacket(AACPManager.createHandshakePacket())
-            delay(200)
-            AACPManager.sendSetFeatureFlagsPacket()
-            delay(200)
-            AACPManager.sendNotificationRequest()
-            delay(200)
-            AACPManager.sendRequestProximityKeys(keyTypes)
-            onIncomingCall()
+            // Read the first subscription's reports while the delayed initialization runs.
+            val finishInitialization = launch {
+                AACPManager.sendPacket(AACPManager.createHandshakePacket())
+                delay(200)
+                AACPManager.sendSetFeatureFlagsPacket()
+                delay(200)
+                AACPManager.sendNotificationRequest()
+                AACPManager.requestEarDetectionState()
+                delay(200)
+                AACPManager.sendRequestProximityKeys(keyTypes)
+                onIncomingCall()
+                onDeviceConnected()
 
-            val repeatHandshake = launch {
                 delay(5000)
                 AACPManager.sendPacket(AACPManager.createHandshakePacket())
                 AACPManager.sendSetFeatureFlagsPacket()
@@ -81,7 +84,6 @@ class BluetoothSocketManager(
             }
 
             try {
-                onDeviceConnected()
                 val buffer = ByteArray(currentSocket.maxReceivePacketSize.coerceAtLeast(1024))
                 val input = currentSocket.inputStream
                 while (currentSocket.isConnected) {
@@ -92,7 +94,7 @@ class BluetoothSocketManager(
             } catch (e: IOException) {
                 if (currentSocket.isConnected) Log.w(TAG, "AACP read failed", e)
             } finally {
-                repeatHandshake.cancel()
+                finishInitialization.cancel()
             }
         }
         socketJob?.invokeOnCompletion { closeSocket(currentSocket) }

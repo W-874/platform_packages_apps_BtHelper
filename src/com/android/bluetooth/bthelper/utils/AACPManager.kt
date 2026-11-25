@@ -50,25 +50,17 @@ object AACPManager {
         return controlCommandStatusList.find { it.identifier == identifier }
     }
 
-    private fun setControlCommandStatusValue(
+    private fun recordControlCommand(
         identifier: ControlCommandIdentifiers,
-        value: ByteArray,
+        command: ControlCommand,
     ) {
-        val existingStatus = getControlCommandStatus(identifier)
-        if (existingStatus?.value?.contentEquals(value) == true) {
-            controlCommandStatusList.remove(existingStatus)
-        }
-        if (existingStatus != null) {
-            controlCommandStatusList.remove(existingStatus)
-        }
-        controlCommandListeners[identifier]?.forEach { listener ->
-            listener.onControlCommandReceived(ControlCommand(identifier.value, value))
-        }
-        controlCommandStatusList.add(ControlCommandStatus(identifier, value))
+        getControlCommandStatus(identifier)?.let { controlCommandStatusList.remove(it) }
+        controlCommandStatusList.add(ControlCommandStatus(identifier, command.value))
 
         if (identifier == ControlCommandIdentifiers.OWNS_CONNECTION) {
-            owns = value.isNotEmpty() && value[0] == 0x01.toByte()
+            owns = command.value[0] == 0x01.toByte()
         }
+        controlCommandListeners[identifier]?.forEach { it.onControlCommandReceived(command) }
     }
 
     interface PacketCallback {
@@ -157,45 +149,18 @@ object AACPManager {
     }
 
     fun sendControlCommand(identifier: Byte, value: ByteArray): Boolean {
-        val controlPacket = createControlCommandPacket(identifier, value)
-        setControlCommandStatusValue(
-            ControlCommandIdentifiers.fromByte(identifier) ?: return false,
-            value,
-        )
-        return sendDataPacket(controlPacket)
+        if (ControlCommandIdentifiers.fromByte(identifier) == null) return false
+        return sendDataPacket(createControlCommandPacket(identifier, value))
     }
 
-    @OptIn(ExperimentalStdlibApi::class)
-    fun sendControlCommand(identifier: Byte, value: Byte): Boolean {
-        val controlPacket = createControlCommandPacket(identifier, byteArrayOf(value))
-        setControlCommandStatusValue(
-            ControlCommandIdentifiers.fromByte(identifier) ?: return false,
-            byteArrayOf(value),
-        )
-        return sendDataPacket(controlPacket)
-    }
+    fun sendControlCommand(identifier: Byte, value: Byte): Boolean =
+        sendControlCommand(identifier, byteArrayOf(value))
 
-    fun sendControlCommand(identifier: Byte, value: Boolean): Boolean {
-        val controlPacket =
-            createControlCommandPacket(
-                identifier,
-                if (value) byteArrayOf(0x01) else byteArrayOf(0x02),
-            )
-        setControlCommandStatusValue(
-            ControlCommandIdentifiers.fromByte(identifier) ?: return false,
-            if (value) byteArrayOf(0x01) else byteArrayOf(0x02),
-        )
-        return sendDataPacket(controlPacket)
-    }
+    fun sendControlCommand(identifier: Byte, value: Boolean): Boolean =
+        sendControlCommand(identifier, if (value) 0x01.toByte() else 0x02.toByte())
 
-    fun sendControlCommand(identifier: Byte, value: Int): Boolean {
-        val controlPacket = createControlCommandPacket(identifier, byteArrayOf(value.toByte()))
-        setControlCommandStatusValue(
-            ControlCommandIdentifiers.fromByte(identifier) ?: return false,
-            byteArrayOf(value.toByte()),
-        )
-        return sendDataPacket(controlPacket)
-    }
+    fun sendControlCommand(identifier: Byte, value: Int): Boolean =
+        sendControlCommand(identifier, value.toByte())
 
     fun parseProximityKeysResponse(data: ByteArray): Map<ProximityKeyType, ByteArray> {
         if (data.size < 7) {
@@ -237,41 +202,45 @@ object AACPManager {
         return opcode + data
     }
 
-    @OptIn(ExperimentalStdlibApi::class)
     fun receivePacket(packet: ByteArray) {
-        if (!packet.toHexString().startsWith("04000400")) {
-            return
-        }
-        if (packet.size < 6) {
-            return
-        }
+        var offset = 0
+        while (packet.size - offset >= 6 && hasDataHeader(packet, offset) &&
+            packet[offset + 5] == 0.toByte()
+        ) {
+            if (packet[offset + 4] != Opcodes.CONTROL_COMMAND) {
+                receiveNotification(if (offset == 0) packet else packet.copyOfRange(offset, packet.size))
+                return
+            }
 
-        val opcode = packet[4]
+            // A read can bundle fixed-size control records. Don't scan opaque payloads.
+            val end = offset + CONTROL_COMMAND_PACKET_SIZE
+            if (end > packet.size ||
+                (end < packet.size && (packet.size - end < 6 || !hasDataHeader(packet, end)))
+            ) return
 
-        when (opcode) {
+            receiveControlCommand(
+                if (offset == 0 && end == packet.size) packet else packet.copyOfRange(offset, end),
+            )
+            offset = end
+        }
+    }
+
+    private fun receiveControlCommand(packet: ByteArray) {
+        val command = ControlCommand.fromByteArray(packet) ?: return
+        val identifier = ControlCommandIdentifiers.fromByte(command.identifier)
+        if (identifier != null) {
+            recordControlCommand(identifier, command)
+            if (identifier == ControlCommandIdentifiers.OWNS_CONNECTION) {
+                callback?.onOwnershipChangeReceived(owns)
+            }
+        }
+        callback?.onControlCommandReceived(packet)
+    }
+
+    private fun receiveNotification(packet: ByteArray) {
+        when (packet[4]) {
             Opcodes.BATTERY_INFO -> {
                 callback?.onBatteryInfoReceived(packet)
-            }
-            Opcodes.CONTROL_COMMAND -> {
-                val controlCommand = ControlCommand.fromByteArray(packet) ?: return
-                setControlCommandStatusValue(
-                    ControlCommandIdentifiers.fromByte(controlCommand.identifier) ?: return,
-                    controlCommand!!.value,
-                )
-
-                val controlCommandIdentifier =
-                    ControlCommandIdentifiers.fromByte(controlCommand.identifier)
-                if (controlCommandIdentifier != null) {
-                    controlCommandListeners[controlCommandIdentifier]?.forEach { listener ->
-                        listener.onControlCommandReceived(controlCommand)
-                    }
-                }
-
-                if (controlCommandIdentifier == ControlCommandIdentifiers.OWNS_CONNECTION) {
-                    callback?.onOwnershipChangeReceived(owns)
-                }
-
-                callback?.onControlCommandReceived(packet)
             }
             Opcodes.EAR_DETECTION -> {
                 callback?.onEarDetectionReceived(packet)
@@ -373,6 +342,7 @@ object AACPManager {
         }
     }
 
+    // Registration elicits current settings such as Conversation Awareness as 0x0009 reports.
     fun sendNotificationRequest(): Boolean {
         return sendDataPacket(createRequestNotificationPacket())
     }
@@ -382,6 +352,9 @@ object AACPManager {
         val data = byteArrayOf(0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte())
         return opcode + data
     }
+
+    internal fun requestEarDetectionState(): Boolean =
+        sendDataPacket(byteArrayOf(Opcodes.REQUEST_EAR_DETECTION, 0x00))
 
     fun sendSetFeatureFlagsPacket(): Boolean {
         return sendDataPacket(createSetFeatureFlagsPacket())
@@ -837,30 +810,20 @@ object AACPManager {
 
         companion object {
             fun fromByteArray(data: ByteArray): ControlCommand? {
-                if (data.size < 7) {
-                    return null
+                val opcodeOffset = when (data.size) {
+                    7 -> 0
+                    CONTROL_COMMAND_PACKET_SIZE ->
+                        if (hasDataHeader(data)) HEADER_BYTES.size else return null
+                    else -> return null
                 }
-                if (
-                    data[0] == 0x04.toByte() &&
-                        data[1] == 0x00.toByte() &&
-                        data[2] == 0x04.toByte() &&
-                        data[3] == 0x00.toByte()
-                ) {
-                    val newData = ByteArray(data.size - 4)
-                    System.arraycopy(data, 4, newData, 0, data.size - 4)
-                    return fromByteArray(newData)
-                }
-                if (data[0] != Opcodes.CONTROL_COMMAND) {
-                    return null
-                }
-                val identifier = data[2]
+                if (data[opcodeOffset] != Opcodes.CONTROL_COMMAND ||
+                    data[opcodeOffset + 1] != 0.toByte()
+                ) return null
 
-                val value = ByteArray(4)
-                System.arraycopy(data, 3, value, 0, 4)
-
-                val trimmedValue = value.dropLastWhile { it == 0x00.toByte() }.toByteArray()
-                val finalValue = if (trimmedValue.isEmpty()) byteArrayOf(0x00) else trimmedValue
-                return ControlCommand(identifier, finalValue)
+                val valueStart = opcodeOffset + 3
+                var valueEnd = data.size
+                while (valueEnd > valueStart + 1 && data[valueEnd - 1] == 0.toByte()) valueEnd--
+                return ControlCommand(data[opcodeOffset + 2], data.copyOfRange(valueStart, valueEnd))
             }
         }
     }
@@ -881,17 +844,8 @@ object AACPManager {
         return sendControlCommand(ControlCommandIdentifiers.STEM_CONFIG.value, value)
     }
 
-    @OptIn(ExperimentalStdlibApi::class)
     fun sendPacket(packet: ByteArray): Boolean {
         try {
-            if (packet[4] == Opcodes.CONTROL_COMMAND) {
-                val controlCommand = ControlCommand.fromByteArray(packet) ?: return false
-                setControlCommandStatusValue(
-                    ControlCommandIdentifiers.fromByte(controlCommand.identifier) ?: return false,
-                    controlCommand.value,
-                )
-            }
-
             val socket = BluetoothConnectionManager.currentSocket
             if (socket?.isConnected == true) {
                 socket.outputStream?.write(packet)
@@ -1010,6 +964,7 @@ object AACPManager {
         const val SET_FEATURE_FLAGS: Byte = 0x4D
         const val REQUEST_NOTIFICATIONS: Byte = 0x0F
         const val BATTERY_INFO: Byte = 0x04
+        internal const val REQUEST_EAR_DETECTION: Byte = 0x05
         const val CONTROL_COMMAND: Byte = 0x09
         const val EAR_DETECTION: Byte = 0x06
         const val CONVERSATION_AWARENESS: Byte = 0x4B
@@ -1028,6 +983,14 @@ object AACPManager {
     }
 
     private val HEADER_BYTES = byteArrayOf(0x04, 0x00, 0x04, 0x00)
+    private const val CONTROL_COMMAND_PACKET_SIZE = 11
+
+    private fun hasDataHeader(data: ByteArray, offset: Int = 0): Boolean {
+        for (i in HEADER_BYTES.indices) {
+            if (data[offset + i] != HEADER_BYTES[i]) return false
+        }
+        return true
+    }
 
     data class ControlCommandStatus(
         val identifier: ControlCommandIdentifiers,

@@ -55,20 +55,25 @@ of arrival order. SDP is queried once per session for a bonded headset declaring
 the AirPods service UUID, independently of the AACP socket. If SDP does not
 identify a model, GATT is read only on an existing LE link or when Android
 already knows the device exposes DIS. PnP IDs require the Bluetooth SIG vendor
-namespace and a known Apple product ID. These reports select artwork, not
-authenticity, battery readings, or advanced controls.
+namespace and a known Apple product ID. A model report selects a product
+profile; it does not authenticate the manufacturer or report a setting value.
 
 On a bonded headset exposing both the AirPods and Airoha service UUIDs, a valid
 split AACP battery report identifies compatible earbuds, not their retail SKU.
 An identity-bound `07 13 01 14 20` advertisement identifies the short-format
 Pro 2 variant ([CAPod factory](https://github.com/d4rken-org/capod/blob/d7817d713691fa7601256eef6bdbdcf2cf0e8426/app/src/main/java/eu/darken/capod/pods/core/apple/ble/devices/misc/FakeAirPodsPro2.kt)).
 
-More settings observes the current headset session. Valid reports on its secure
-AACP socket can enable wear detection, conversation settings or personalized
-volume separately. Listening modes are selectable only after the accessory has
-reported those modes, and the displayed mode follows its acknowledgement.
-Disconnecting discards socket-derived capabilities. To see the selected model,
-source and session state without logging addresses or keys, use
+On a bonded AACP connection, More settings offers controls from the identified
+model's feature table. Pro 2 earbuds using the Airoha service have a separate
+compatibility profile: Off, ANC and Transparency are selectable before the
+first mode report. Optional features are not inherited from the Apple PID alone.
+The host subscribes for status and requests wear state during initialization.
+A control write requests a status refresh; a successful socket write never
+changes the displayed setting. Disconnecting clears the current values. Valid
+peer reports can also establish capabilities, which survive reconnects and are
+forgotten on unpairing. For protocol details see [LibrePods control commands](https://github.com/librepods-org/librepods/blob/89356c08cea3db0b6b54792d9329d09a87cc85fa/docs/control_commands.md)
+and the [1562AE compatibility profile](https://help.magicpods.app/headphones/airoha-airpodspro-1562ae/).
+To inspect the selected model, source and live session without exposing keys:
 `adb shell dumpsys activity service com.android.bluetooth.bthelper/.pods.PodsService`.
 
 The SDP product IDs and AACP framing were cross-checked against MagicPodsCore's

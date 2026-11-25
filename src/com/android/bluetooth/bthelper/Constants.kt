@@ -76,6 +76,9 @@ object Constants {
 
     const val ACTION_SET_ANC_MODE: String = AUTHORITY_BTHELPER + ".SET_ANC_MODE"
     const val EXTRA_MODE: String = "mode"
+    const val ACTION_SET_ACCESSORY_OPTION = "$AUTHORITY_BTHELPER.SET_ACCESSORY_OPTION"
+    const val EXTRA_OPTION_KEY = "option_key"
+    const val EXTRA_OPTION_ENABLED = "option_enabled"
 
     const val AIRPODS_PSM = 0x1001
 
