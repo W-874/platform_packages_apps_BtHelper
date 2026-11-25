@@ -43,6 +43,9 @@ headset's public address or its Android-resolved public identity. The standard
 authorize it. An advertised known model selects artwork, not authentication or
 control support. AACP battery reports can publish without a model; missing or
 invalid component readings are not converted to zero or an aggregate percentage.
+For unrecognized earbuds, BtHelper leaves icon selection to Android, removing
+its own previously published icons without clearing third-party artwork or
+left/right/case battery metadata.
 
 The short format doesn't establish wear or lid state and doesn't enable advanced
 controls. No clone-specific command transport is implemented. The short-format

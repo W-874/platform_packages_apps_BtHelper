@@ -1362,23 +1362,23 @@ class PodsService :
         rightDrawable: Int,
         caseDrawable: Int,
     ): Boolean {
-        var ret = device.setMetadataUri(BluetoothDevice.METADATA_MAIN_ICON, getIconUri(drawable))
-        ret =
-            device.setMetadataUri(
-                BluetoothDevice.METADATA_UNTETHERED_LEFT_ICON,
-                getIconUri(leftDrawable),
-            )
-        ret =
-            device.setMetadataUri(
-                BluetoothDevice.METADATA_UNTETHERED_RIGHT_ICON,
-                getIconUri(rightDrawable),
-            )
-        ret =
-            device.setMetadataUri(
-                BluetoothDevice.METADATA_UNTETHERED_CASE_ICON,
-                getIconUri(caseDrawable),
-            )
-        return ret
+        val main = setRegularPodsIcon(device, BluetoothDevice.METADATA_MAIN_ICON, drawable)
+        val left = setRegularPodsIcon(device, BluetoothDevice.METADATA_UNTETHERED_LEFT_ICON, leftDrawable)
+        val right = setRegularPodsIcon(device, BluetoothDevice.METADATA_UNTETHERED_RIGHT_ICON, rightDrawable)
+        val case = setRegularPodsIcon(device, BluetoothDevice.METADATA_UNTETHERED_CASE_ICON, caseDrawable)
+        return main && left && right && case
+    }
+
+    private fun setRegularPodsIcon(device: BluetoothDevice, key: Int, drawable: Int): Boolean {
+        if (drawable != 0) {
+            val uri = getIconUri(drawable) ?: return false
+            return device.setMetadataUri(key, uri)
+        }
+
+        // Leave other providers' artwork alone; an empty value removes our old override.
+        val previous = device.getMetadata(key) ?: return true
+        if (Uri.parse(previous.decodeToString()).authority != Constants.AUTHORITY_FILE) return true
+        return device.setMetadataValue(key, byteArrayOf())
     }
 
     private fun setSinglePodsMetadata(
