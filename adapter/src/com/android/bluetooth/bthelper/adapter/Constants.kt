@@ -23,8 +23,6 @@ object Constants {
     /* Intent Actions and extras */
     const val ACTION_SET_SLICE: String = AUTHORITY_BTHELPER + ".SET_SLICE"
     const val EXTRA_METADATA_KEY: String = "metadata_key"
-
-    const val METADATA_FAST_PAIR_CUSTOMIZED_FIELDS = 25
 }
 
 fun getSliceUri(macAddress: String? = null): Uri =

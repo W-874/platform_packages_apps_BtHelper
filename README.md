@@ -24,6 +24,11 @@ in this Bluetooth tree already recognizes the AirPods SDP UUID, so do not apply
 the upstream generic L2CAP fallback patch. Settings and SystemUI consume the
 standard Bluetooth metadata and existing slice contract.
 
+Discovery uses the three `DEVICE_SETTINGS_CONFIG_*` fragments in Bluetooth
+metadata key 25. BtHelper appends only missing fragments that agree with its
+endpoint, preserving other owners' fields and leaving conflicting or malformed
+data unchanged. The adapter no longer publishes Control Slice metadata; its
+separate legacy Settings shortcut remains available.
 BtHelper requests `LOCAL_MAC_ADDRESS` for AACP cross-device audio routing.
 It reads the adapter address only when routing needs it; a missing or redacted
 address does not prevent service startup or device metadata updates.
@@ -43,9 +48,12 @@ headset's public address or its Android-resolved public identity. The standard
 authorize it. An advertised known model selects artwork, not authentication or
 control support. AACP battery reports can publish without a model; missing or
 invalid component readings are not converted to zero or an aggregate percentage.
-For unrecognized earbuds, BtHelper leaves icon selection to Android, removing
-its own previously published icons without clearing third-party artwork or
-left/right/case battery metadata.
+On-ear and over-ear models publish a single headset battery, not split TWS
+metadata. BtHelper retires a battery reading only if it still matches a value
+written by the current service. For unrecognized earbuds, BtHelper leaves icon
+selection to Android, removing only its own previously published artwork.
+Model-specific content URIs are granted to the existing Settings and SystemUI
+allowlist before publication.
 
 Artwork uses the first known model in this order: IRK-verified BLE, the primary
 SDP Device Identification record (`0x1200`), AACP device information (`0x001D`),
