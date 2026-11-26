@@ -21,6 +21,10 @@
         <package android:name="com.google.android.settings.intelligence" />
     </queries>
 
+    <permission
+        android:name="com.android.bluetooth.bthelper.permission.BIND_DEVICE_SETTINGS"
+        android:protectionLevel="signature" />
+
     <attribution
         android:tag="BtHelper"
         android:label="@string/app_name" />
@@ -96,6 +100,24 @@
             android:name=".pods.PodsService"
             android:enabled="true"
             android:exported="false" />
+
+        <!-- SettingsLib clients use Fast Pair metadata to bind these services in the app process. -->
+        <service
+            android:name=".BtHelperDeviceSettingsConfigService"
+            android:exported="true"
+            android:permission="com.android.bluetooth.bthelper.permission.BIND_DEVICE_SETTINGS">
+            <intent-filter>
+                <action android:name="com.android.bluetooth.bthelper.action.DEVICE_SETTINGS_CONFIG" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".BtHelperDeviceSettingsProviderService"
+            android:exported="true"
+            android:permission="com.android.bluetooth.bthelper.permission.BIND_DEVICE_SETTINGS">
+            <intent-filter>
+                <action android:name="com.android.bluetooth.bthelper.action.DEVICE_SETTINGS_PROVIDER" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".StartupReceiver"

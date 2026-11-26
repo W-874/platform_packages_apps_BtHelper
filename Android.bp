@@ -40,6 +40,7 @@ android_app {
         "kotlin-stdlib-jdk7",
         "androidx.compose.runtime_runtime",
         "kotlinx_coroutines_android",
+        // SettingsLib supplies the device settings parcelables and generated Binder interfaces.
         "SettingsLib",
         "SettingsLibSettingsTheme",
     ],

@@ -21,14 +21,20 @@ uses the platform's hidden BR/EDR L2CAP factory via one scoped method lookup
 because the factory is absent from the Bluetooth compile stubs. No per-package
 hidden API exemption is needed for platform-signed apps. `l2c_should_skip_ertm`
 in this Bluetooth tree already recognizes the AirPods SDP UUID, so do not apply
-the upstream generic L2CAP fallback patch. Settings and SystemUI consume the
-standard Bluetooth metadata and existing slice contract.
+the upstream generic L2CAP fallback patch.
 
+Settings and SystemUI discover the native Bluetooth device settings services
+through standard Fast Pair customized metadata. Both clients request BtHelper's
+signature permission, `com.android.bluetooth.bthelper.permission.BIND_DEVICE_SETTINGS`.
+Settings keeps the standard Bluetooth device preferences and hosts the native
+More Settings page. The provider reads and updates the existing PodsService
+session; binding does not open a connection to the headset.
 Discovery uses the three `DEVICE_SETTINGS_CONFIG_*` fragments in Bluetooth
 metadata key 25. BtHelper appends only missing fragments that agree with its
 endpoint, preserving other owners' fields and leaving conflicting or malformed
 data unchanged. The adapter no longer publishes Control Slice metadata; its
 separate legacy Settings shortcut remains available.
+
 BtHelper requests `LOCAL_MAC_ADDRESS` for AACP cross-device audio routing.
 It reads the adapter address only when routing needs it; a missing or redacted
 address does not prevent service startup or device metadata updates.
