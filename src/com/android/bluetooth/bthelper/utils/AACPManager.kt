@@ -18,6 +18,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * Apple accessories.
  */
 object AACPManager {
+    private val writeLock = Any()
 
     var controlCommandStatusList: MutableList<ControlCommandStatus> =
         mutableListOf<ControlCommandStatus>()
@@ -123,7 +124,7 @@ object AACPManager {
 
     private var callback: PacketCallback? = null
 
-    fun setPacketCallback(callback: PacketCallback) {
+    fun setPacketCallback(callback: PacketCallback?) {
         this.callback = callback
     }
 
@@ -273,6 +274,7 @@ object AACPManager {
                 callback?.onConnectedDevicesReceived(connectedDevices)
             }
             Opcodes.SMART_ROUTING_RESP -> {
+                if (packet.size < 12) return
                 val packetString = packet.decodeToString()
                 val sender =
                     packet.sliceArray(6..11).reversedArray().joinToString(":") { "%02X".format(it) }
@@ -845,17 +847,21 @@ object AACPManager {
     }
 
     fun sendPacket(packet: ByteArray): Boolean {
-        try {
-            val socket = BluetoothConnectionManager.currentSocket
-            if (socket?.isConnected == true) {
-                socket.outputStream?.write(packet)
-                socket.outputStream?.flush()
-                return true
-            } else {
-                return false
+        val socket = BluetoothConnectionManager.currentSocket ?: return false
+        return sendPacket(packet, socket)
+    }
+
+    internal fun sendPacket(packet: ByteArray, socket: android.bluetooth.BluetoothSocket): Boolean {
+        return synchronized(writeLock) {
+            if (BluetoothConnectionManager.currentSocket !== socket || !socket.isConnected) return false
+            try {
+                val output = socket.outputStream ?: return false
+                output.write(packet)
+                output.flush()
+                true
+            } catch (_: Exception) {
+                false
             }
-        } catch (e: Exception) {
-            return false
         }
     }
 
@@ -891,7 +897,7 @@ object AACPManager {
     }
 
     fun parseAudioSourceResponse(data: ByteArray): Pair<String, AudioSourceType>? {
-        if (data.size < 9) {
+        if (data.size < 13) {
             return null
         }
         if (data[4] != Opcodes.AUDIO_SOURCE) {
@@ -905,7 +911,7 @@ object AACPManager {
     }
 
     fun parseConnectedDevicesResponse(data: ByteArray): List<ConnectedDevice> {
-        if (data.size < 8) {
+        if (data.size < 9) {
             return emptyList()
         }
         if (data[4] != Opcodes.CONNECTED_DEVICES) {

@@ -77,17 +77,24 @@ split AACP battery report identifies compatible earbuds, not their retail SKU.
 An identity-bound `07 13 01 14 20` advertisement identifies the short-format
 Pro 2 variant ([CAPod factory](https://github.com/d4rken-org/capod/blob/d7817d713691fa7601256eef6bdbdcf2cf0e8426/app/src/main/java/eu/darken/capod/pods/core/apple/ble/devices/misc/FakeAirPodsPro2.kt)).
 
-On a bonded AACP connection, More settings offers controls from the identified
-model's feature table. A headset identifying as Pro 2 uses the full Pro 2
-control profile, including when it also exposes the Airoha service. The current
-value of a setting can be unknown without preventing the user from changing it.
-The host subscribes for status and requests wear state during initialization.
-A control write requests a status refresh; a successful socket write never
-changes the displayed setting. Disconnecting clears the current values. Valid
-peer reports can also establish capabilities, which survive reconnects and are
-forgotten on unpairing. For protocol details see [LibrePods control commands](https://github.com/librepods-org/librepods/blob/89356c08cea3db0b6b54792d9329d09a87cc85fa/docs/control_commands.md).
+On a bonded AACP connection, native Settings and the app's preference page use
+the same session state and command path. An identified model can establish
+support, but never a current value. Additional settings are enabled only after
+a valid report for their documented payload. A write stays pending until a
+headset report or until it times out; timeout never changes the confirmed value.
+Disconnecting clears pending and confirmed headset values. Wear, conversation
+and gesture reports enable the corresponding Android-side policies, which are
+saved by bonded address. Unpairing forgets those policies and learned capabilities.
+For wire formats see [LibrePods control commands](https://github.com/librepods-org/librepods/blob/89356c08cea3db0b6b54792d9329d09a87cc85fa/docs/control_commands.md).
+IDs without a documented setting payload are not exposed as controls. Routing,
+wear, battery, stem press, proximity keys, and head tracking packets are session
+events, not saved accessory setting values.
 To inspect the selected model, source and live session without exposing keys:
 `adb shell dumpsys activity service com.android.bluetooth.bthelper/.pods.PodsService`.
+
+After building `BtHelper`, run `packages/apps/BtHelper/tests/run-host-tests.sh`
+from the source tree to check report parsing, pending writes and bonded session
+isolation without a connected device.
 
 The SDP product IDs and AACP framing were cross-checked against MagicPodsCore's
 [model table](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/enums/AapModelIds.h)

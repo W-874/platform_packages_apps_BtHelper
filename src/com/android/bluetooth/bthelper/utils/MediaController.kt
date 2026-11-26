@@ -10,17 +10,14 @@
 package com.android.bluetooth.bthelper.utils
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.media.AudioManager
 import android.media.AudioPlaybackConfiguration
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
-import com.android.bluetooth.bthelper.Constants
-import com.android.bluetooth.bthelper.getSharedPreferences
 import kotlin.io.encoding.ExperimentalEncodingApi
 
-object MediaController : SharedPreferences.OnSharedPreferenceChangeListener {
+object MediaController {
 
     @Volatile private var isRegistered: Boolean = false
 
@@ -33,14 +30,6 @@ object MediaController : SharedPreferences.OnSharedPreferenceChangeListener {
         @Synchronized set
 
     var userPlayedTheMedia = false
-        @Synchronized get
-        @Synchronized set
-
-    private var relativeVolume: Boolean = false
-        @Synchronized get
-        @Synchronized set
-
-    private var conversationalAwarenessVolume: Int = 2
         @Synchronized get
         @Synchronized set
 
@@ -63,33 +52,15 @@ object MediaController : SharedPreferences.OnSharedPreferenceChangeListener {
             }
         }
     private var audioManager: AudioManager? = null
-    private var sharedPreferences: SharedPreferences? = null
 
     @Synchronized
     fun onCreate(context: Context) {
         if (isRegistered) return
 
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        sharedPreferences = context.getSharedPreferences()
         handler = Handler(Looper.getMainLooper())
         val audioManager = this.audioManager ?: return
-        val sharedPreferences = this.sharedPreferences ?: return
         val handler = this.handler ?: return
-
-        relativeVolume =
-            sharedPreferences.getBoolean(
-                Constants.KEY_RELATIVE_CONVERSATIONAL_AWARENESS_VOLUME,
-                true,
-            )
-        conversationalAwarenessVolume =
-            sharedPreferences.getInt(
-                Constants.KEY_CONVERSATIONAL_AWARENESS_VOLUME,
-                (audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * 0.4).toInt(),
-            )
-        conversationalAwarenessPauseMusic =
-            sharedPreferences.getBoolean(Constants.KEY_CONVERSATIONAL_AWARENESS_PAUSE_MUSIC, false)
-
-        sharedPreferences.registerOnSharedPreferenceChangeListener(this)
 
         audioManager.registerAudioPlaybackCallback(cb, handler)
 
@@ -97,41 +68,9 @@ object MediaController : SharedPreferences.OnSharedPreferenceChangeListener {
     }
 
     @Synchronized
-    override fun onSharedPreferenceChanged(preferences: SharedPreferences?, key: String?) {
-        if (preferences == null || key == null) return
-        val audioManager = this.audioManager ?: return
-
-        when (key) {
-            Constants.KEY_RELATIVE_CONVERSATIONAL_AWARENESS_VOLUME -> {
-                relativeVolume =
-                    preferences.getBoolean(
-                        Constants.KEY_RELATIVE_CONVERSATIONAL_AWARENESS_VOLUME,
-                        true,
-                    )
-            }
-            Constants.KEY_CONVERSATIONAL_AWARENESS_VOLUME -> {
-                conversationalAwarenessVolume =
-                    preferences.getInt(
-                        Constants.KEY_CONVERSATIONAL_AWARENESS_VOLUME,
-                        (audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * 0.4).toInt(),
-                    )
-            }
-            Constants.KEY_CONVERSATIONAL_AWARENESS_PAUSE_MUSIC -> {
-                conversationalAwarenessPauseMusic =
-                    preferences.getBoolean(
-                        Constants.KEY_CONVERSATIONAL_AWARENESS_PAUSE_MUSIC,
-                        false,
-                    )
-            }
-        }
-    }
-
-    @Synchronized
     fun onDestroy() {
         if (!isRegistered) return
 
-        sharedPreferences?.unregisterOnSharedPreferenceChangeListener(this)
-        sharedPreferences = null
         audioManager?.unregisterAudioPlaybackCallback(cb)
         audioManager = null
         handler?.removeCallbacksAndMessages(null)
@@ -209,43 +148,50 @@ object MediaController : SharedPreferences.OnSharedPreferenceChangeListener {
     }
 
     @Synchronized
-    fun startSpeaking() {
+    fun startSpeaking(pause: Boolean, relative: Boolean, percent: Int) {
         val audioManager = this.audioManager ?: return
         if (initialVolume == null) {
             initialVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
             val targetVolume =
-                if (relativeVolume) {
-                    ((initialVolume ?: 0) * conversationalAwarenessVolume / 100)
+                if (relative) {
+                    ((initialVolume ?: 0) * percent / 100)
                 } else if (
                     (initialVolume ?: 0) >
                         (audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) *
-                            conversationalAwarenessVolume / 100)
+                            percent / 100)
                 ) {
                     (audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) *
-                        conversationalAwarenessVolume / 100)
+                        percent / 100)
                 } else {
                     initialVolume
                 }
             targetVolume?.let { smoothVolumeTransition((initialVolume ?: 0), it) }
-            if (conversationalAwarenessPauseMusic) {
+            conversationalAwarenessPauseMusic = pause
+            if (pause) {
                 sendPause(force = true)
             }
         }
     }
 
+    private var volumeTransition: Runnable? = null
+    private var restoringVolume: Int? = null
+
     @Synchronized
-    fun stopSpeaking() {
-        val audioManager = this.audioManager ?: return
-        if (initialVolume != null) {
-            smoothVolumeTransition(
-                audioManager.getStreamVolume(AudioManager.STREAM_MUSIC),
-                (initialVolume ?: 0),
-            )
-            if (conversationalAwarenessPauseMusic) {
-                sendPlay()
-            }
-            initialVolume = null
+    fun stopSpeaking(immediate: Boolean = false) {
+        val audio = audioManager ?: return
+        val previous = initialVolume ?: restoringVolume ?: return
+        if (initialVolume == null && !immediate) return
+        if (immediate) {
+            volumeTransition?.let { handler?.removeCallbacks(it) }
+            volumeTransition = null
+            restoringVolume = null
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, previous, 0)
+        } else {
+            restoringVolume = previous
+            smoothVolumeTransition(audio.getStreamVolume(AudioManager.STREAM_MUSIC), previous)
         }
+        if (initialVolume != null && conversationalAwarenessPauseMusic) sendPlay()
+        initialVolume = null
     }
 
     @Synchronized
@@ -256,16 +202,20 @@ object MediaController : SharedPreferences.OnSharedPreferenceChangeListener {
         val audioManager = this.audioManager ?: return
         val handler = this.handler ?: return
 
-        handler.post(
-            object : Runnable {
-                override fun run() {
-                    if (currentVolume != toVolume) {
-                        currentVolume += step
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, currentVolume, 0)
-                        handler.postDelayed(this, delay)
-                    }
+        volumeTransition?.let { handler.removeCallbacks(it) }
+        val transition = object : Runnable {
+            override fun run() {
+                if (currentVolume != toVolume) {
+                    currentVolume += step
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, currentVolume, 0)
+                }
+                if (currentVolume != toVolume) handler.postDelayed(this, delay) else {
+                    volumeTransition = null
+                    restoringVolume = null
                 }
             }
-        )
+        }
+        volumeTransition = transition
+        handler.post(transition)
     }
 }

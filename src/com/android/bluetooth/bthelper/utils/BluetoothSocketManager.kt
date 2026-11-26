@@ -17,10 +17,8 @@ import kotlinx.coroutines.launch
 
 class BluetoothSocketManager(
     private val serviceScope: CoroutineScope,
-    private val onIncomingCall: () -> Unit,
-    private val onCallReceived: () -> Unit,
-    private val onDeviceConnected: () -> Unit,
-    private val onLinkChanged: (String, Boolean) -> Unit,
+    private val onLinkChanged: (BluetoothSocket, Boolean) -> Unit,
+    private val onPacket: (BluetoothSocket, ByteArray) -> Unit,
 ) {
 
     private var currentSocket: BluetoothSocket? = null
@@ -29,7 +27,7 @@ class BluetoothSocketManager(
 
     @Synchronized
     fun connectToSocket(device: BluetoothDevice?) {
-        if (device == null || stopped || currentSocket != null) return
+        if (device == null || device.bondState != BluetoothDevice.BOND_BONDED || stopped || currentSocket != null) return
 
         currentSocket =
             try {
@@ -51,36 +49,30 @@ class BluetoothSocketManager(
             synchronized(this@BluetoothSocketManager) {
                 if (this@BluetoothSocketManager.currentSocket !== currentSocket) return@launch
                 BluetoothConnectionManager.currentSocket = currentSocket
-                BluetoothConnectionManager.isConnected = true
-                onLinkChanged(device.address, true)
             }
 
-            AACPManager.sendPacket(AACPManager.createHandshakePacket())
-            AACPManager.sendSetFeatureFlagsPacket()
-            AACPManager.sendNotificationRequest()
-            val keyTypes = (AACPManager.ProximityKeyType.IRK.value +
-                    AACPManager.ProximityKeyType.ENC_KEY.value).toByte()
-            AACPManager.sendRequestProximityKeys(keyTypes)
+            fun send(data: ByteArray) = AACPManager.sendPacket(AACPManager.createDataPacket(data), currentSocket)
+            if (!AACPManager.sendPacket(AACPManager.createHandshakePacket(), currentSocket)) return@launch
+            send(AACPManager.createSetFeatureFlagsPacket())
+            send(AACPManager.createRequestNotificationPacket())
+            val keyTypes = (AACPManager.ProximityKeyType.IRK.value + AACPManager.ProximityKeyType.ENC_KEY.value).toByte()
+            send(AACPManager.createRequestProximityKeysPacket(keyTypes))
 
-            // Read the first subscription's reports while the delayed initialization runs.
+            synchronized(this@BluetoothSocketManager) {
+                if (this@BluetoothSocketManager.currentSocket !== currentSocket) return@launch
+                BluetoothConnectionManager.isConnected = true
+                onLinkChanged(currentSocket, true)
+            }
+
+            // Continue reading while firmware finishes its delayed initialization.
             val finishInitialization = launch {
-                AACPManager.sendPacket(AACPManager.createHandshakePacket())
                 delay(200)
-                AACPManager.sendSetFeatureFlagsPacket()
+                send(AACPManager.createSetFeatureFlagsPacket())
                 delay(200)
-                AACPManager.sendNotificationRequest()
-                AACPManager.requestEarDetectionState()
+                send(AACPManager.createRequestNotificationPacket())
+                send(byteArrayOf(AACPManager.Opcodes.REQUEST_EAR_DETECTION, 0x00))
                 delay(200)
-                AACPManager.sendRequestProximityKeys(keyTypes)
-                onIncomingCall()
-                onDeviceConnected()
-
-                delay(5000)
-                AACPManager.sendPacket(AACPManager.createHandshakePacket())
-                AACPManager.sendSetFeatureFlagsPacket()
-                AACPManager.sendNotificationRequest()
-                AACPManager.sendRequestProximityKeys(AACPManager.ProximityKeyType.IRK.value)
-                onCallReceived()
+                send(AACPManager.createRequestProximityKeysPacket(keyTypes))
             }
 
             try {
@@ -89,7 +81,7 @@ class BluetoothSocketManager(
                 while (currentSocket.isConnected) {
                     val bytesRead = input.read(buffer)
                     if (bytesRead < 0) break
-                    if (bytesRead > 0) AACPManager.receivePacket(buffer.copyOf(bytesRead))
+                    if (bytesRead > 0) onPacket(currentSocket, buffer.copyOf(bytesRead))
                 }
             } catch (e: IOException) {
                 if (currentSocket.isConnected) Log.w(TAG, "AACP read failed", e)
@@ -116,7 +108,7 @@ class BluetoothSocketManager(
         socketJob = null
         BluetoothConnectionManager.currentSocket = null
         BluetoothConnectionManager.isConnected = false
-        onLinkChanged(socket.remoteDevice.address, false)
+        onLinkChanged(socket, false)
         try {
             socket.close()
         } catch (e: IOException) {

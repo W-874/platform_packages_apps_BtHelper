@@ -64,6 +64,7 @@ import com.android.bluetooth.bthelper.getSharedPreferences
 import com.android.bluetooth.bthelper.getUriAllowlist
 import com.android.bluetooth.bthelper.isLowLatencySupported
 import com.android.bluetooth.bthelper.setSingleDevice
+import com.android.bluetooth.bthelper.pods.AccessoryControls.Control
 import com.android.bluetooth.bthelper.utils.A2dpReceiver
 import com.android.bluetooth.bthelper.utils.AACPManager
 import com.android.bluetooth.bthelper.utils.AACPManager.StemPressType
@@ -80,6 +81,7 @@ import com.android.bluetooth.bthelper.utils.GestureDetector
 import com.android.bluetooth.bthelper.utils.HeadTracking
 import com.android.bluetooth.bthelper.utils.KeyStorageManager
 import com.android.bluetooth.bthelper.utils.MediaController
+import com.android.bluetooth.bthelper.utils.PodsBatteryMetadata
 import com.android.bluetooth.bthelper.utils.PodsA2dpListener
 import com.android.bluetooth.bthelper.utils.PodsUuidListener
 import com.android.bluetooth.bthelper.utils.StemAction
@@ -91,10 +93,11 @@ import com.android.bluetooth.bthelper.utils.models.RegularPods
 import com.android.bluetooth.bthelper.utils.models.RegularPodsMetadata
 import com.android.bluetooth.bthelper.utils.models.SinglePods
 import com.android.bluetooth.bthelper.utils.models.SinglePodsMetadata
+import com.android.bluetooth.bthelper.utils.publishDeviceSettingsDiscovery
+import com.android.bluetooth.bthelper.utils.setBatteryThresholdMetadata
 import com.android.bluetooth.bthelper.utils.setMetadataBoolean
-import com.android.bluetooth.bthelper.utils.setMetadataInt
 import com.android.bluetooth.bthelper.utils.setMetadataString
-import com.android.bluetooth.bthelper.utils.setMetadataUri
+import com.android.bluetooth.bthelper.utils.setPodsIconMetadata
 import com.android.bluetooth.bthelper.utils.setMetadataValue
 import java.io.File
 import java.io.FileDescriptor
@@ -132,14 +135,6 @@ class PodsService :
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     data class ServiceConfig(
-        var earDetectionEnabled: Boolean = true,
-        var conversationalAwareness: Boolean = false,
-        var conversationalAwarenessPauseMusic: Boolean = false,
-        var relativeConversationalAwarenessVolume: Boolean = true,
-        var headGestures: Boolean = true,
-        var disconnectWhenNotWearing: Boolean = false,
-        var conversationalAwarenessVolume: Int = 43,
-        var useAlternatePackets: Boolean = false,
         var leftSinglePressAction: StemAction =
             StemAction.defaultActions[StemPressType.SINGLE_PRESS]!!,
         var rightSinglePressAction: StemAction =
@@ -160,6 +155,12 @@ class PodsService :
 
     private var config: ServiceConfig? = null
     private var bluetoothSocketManager: BluetoothSocketManager? = null
+    private val availableDevices = linkedMapOf<String, BluetoothDevice>()
+    private var activeSocket: BluetoothSocket? = null
+    private var activeSession = 0L
+    private var reconnectJob: Job? = null
+    private var discoveryPublished = false
+    private val batteryMetadata = PodsBatteryMetadata()
 
     private var currentDevice: BluetoothDevice? = null
 
@@ -216,14 +217,14 @@ class PodsService :
     var cameraActive = false
     private var disconnectedBecauseReversed = false
 
-    val earDetectNotif = AirPodsNotifications.EarDetection()
-    val ancNotif = AirPodsNotifications.ANC()
-    val batteryNotif = AirPodsNotifications.BatteryNotification()
-    val conversAwareNotif = AirPodsNotifications.ConversationalAwarenessNotification()
+    private var earDetectNotif = AirPodsNotifications.EarDetection()
+    private var batteryNotif = AirPodsNotifications.BatteryNotification()
+    private var conversAwareNotif = AirPodsNotifications.ConversationalAwarenessNotification()
     val handler = Handler(Looper.getMainLooper())
 
     @Volatile var isHeadTrackingActive = false
 
+    private var headTrackingUsesAlternatePackets = false
     var uuidReceiver: UuidReceiver? = null
     var a2dpReceiver: A2dpReceiver? = null
     var bleManager: BLEManager? = null
@@ -316,18 +317,18 @@ class PodsService :
         incomingCallJob?.cancel()
 
         incomingCallJob =
-            serviceScope.launch {
+            serviceScope.launch(Dispatchers.Main) {
                 delay(100)
                 handleIncomingCall(state)
             }
     }
 
-    suspend fun handleIncomingCall(state: Int) {
-        val bleManager = bleManager ?: return
+    private fun handleIncomingCall(state: Int) {
         when (state) {
             TelephonyManager.CALL_STATE_RINGING -> {
-                if (config?.headGestures == true && AccessoryControls.state.value.allows(AccessoryControls.HEAD_GESTURES)) {
-                    startHeadTracking()
+                if (AccessoryControls.state.value.supports(Control.HEAD_GESTURES) &&
+                    AccessoryControls.state.value.value(Control.HEAD_GESTURES) == 1 && startHeadTracking()
+                ) {
                     gestureDetector?.startDetection { accepted ->
                         if (accepted) {
                             answerCall()
@@ -414,9 +415,7 @@ class PodsService :
     }
 
     private fun observeControl(feature: Int): Boolean {
-        val device = currentDevice ?: return false
-        if (BluetoothConnectionManager.currentSocket?.remoteDevice != device) return false
-        AccessoryControls.observed(device.address, feature)
+        AccessoryControls.observed(activeSession, feature)
         return AccessoryControls.state.value.allows(feature)
     }
 
@@ -429,7 +428,12 @@ class PodsService :
         if (!observeControl(AccessoryControls.CONVERSATION_EVENTS)) return
         conversAwareNotif.setData(conversationAwareness)
         if (conversAwareNotif.status == 1.toByte() || conversAwareNotif.status == 2.toByte()) {
-            MediaController.startSpeaking()
+            val state = AccessoryControls.state.value
+            MediaController.startSpeaking(
+                pause = state.value(Control.PAUSE_MUSIC_WHEN_SPEAKING) == 1,
+                relative = state.value(Control.RELATIVE_CONVERSATION_VOLUME) == 1,
+                percent = state.value(Control.CONVERSATION_VOLUME) ?: Control.CONVERSATION_VOLUME.default,
+            )
         } else if (
             conversAwareNotif.status == 8.toByte() || conversAwareNotif.status == 9.toByte()
         ) {
@@ -439,23 +443,7 @@ class PodsService :
 
     override fun onControlCommandReceived(controlCommand: ByteArray) {
         val command = AACPManager.ControlCommand.fromByteArray(controlCommand) ?: return
-        val value = command.value.singleOrNull()?.toInt() ?: return
-        val device = currentDevice ?: return
-        if (BluetoothConnectionManager.currentSocket?.remoteDevice != device) return
-        val address = device.address
-        when (command.identifier) {
-            AACPManager.ControlCommandIdentifiers.LISTENING_MODE.value -> if (value in 1..4) {
-                ancNotif.setStatus(command.value)
-                AccessoryControls.listeningMode(address, value)
-            }
-            AACPManager.ControlCommandIdentifiers.LISTENING_MODE_CONFIGS.value -> AccessoryControls.reportCycle(address, value)
-            AACPManager.ControlCommandIdentifiers.ALLOW_OFF_OPTION.value -> if (value in 1..2)
-                AccessoryControls.allowOff(address, value == 1)
-            AACPManager.ControlCommandIdentifiers.ADAPTIVE_VOLUME_CONFIG.value -> if (value in 1..2)
-                AccessoryControls.reportOption(address, AccessoryControls.PERSONAL_VOLUME, value == 1)
-            AACPManager.ControlCommandIdentifiers.CONVERSATION_DETECT_CONFIG.value -> if (value in 1..2)
-                AccessoryControls.reportOption(address, AccessoryControls.CONVERSATION_CONFIG, value == 1)
-        }
+        AccessoryControls.received(activeSession, command)
     }
 
     override fun onOwnershipChangeReceived(owns: Boolean) {
@@ -482,14 +470,11 @@ class PodsService :
         MediaController.sendPause(true)
     }
 
-    override fun onShowNearbyUI(sender: String) {
-        val senderName =
-            AACPManager.connectedDevices.find { it.mac == sender }?.type ?: "Other device"
-    }
+    override fun onShowNearbyUI(sender: String) = Unit
 
     override fun onHeadTrackingReceived(headTracking: ByteArray) {
-        if (isHeadTrackingData(headTracking) && !AccessoryControls.state.value.allows(AccessoryControls.HEAD_GESTURES)) {
-            observeControl(AccessoryControls.HEAD_GESTURES)
+        if (isHeadTrackingData(headTracking)) {
+            observeControl(AccessoryControls.HEAD_GESTURE_REPORTS)
         }
         if (isHeadTrackingActive) {
             HeadTracking.processPacket(headTracking)
@@ -640,11 +625,10 @@ class PodsService :
                 startActivity(intent)
             }
             StemAction.CYCLE_NOISE_CONTROL_MODES -> {
-                sendBroadcast(Intent(Constants.ACTION_SET_ANC_MODE))
+                cycleListeningMode()
             }
         }
     }
-
     private fun triggerVirtualKeypress(keyCode: Int) {
         val now: Long = SystemClock.uptimeMillis()
         val downEvent: KeyEvent =
@@ -677,8 +661,7 @@ class PodsService :
         val previous = earDetectNotif.status.count { it == 0.toByte() }
         val worn = (if (earDetection[6] == 0.toByte()) 1 else 0) + (if (earDetection[7] == 0.toByte()) 1 else 0)
         earDetectNotif.setStatus(earDetection)
-        if (config?.earDetectionEnabled != true || previous == worn || (firstReport && !hasStandardModel)) return
-
+        if (AccessoryControls.state.value.value(Control.AUTOMATIC_EAR_DETECTION) != 1 || previous == worn || (firstReport && !hasStandardModel)) return
         if (previous == 0 && worn > 0) {
             connectAudio()
             registerA2dpConnectionReceiver()
@@ -687,7 +670,7 @@ class PodsService :
             }
         } else if (worn == 0) {
             MediaController.sendPause(force = true)
-            if (config?.disconnectWhenNotWearing == true) {
+            if (AccessoryControls.state.value.value(Control.DISCONNECT_WHEN_NOT_WEARING) == 1) {
                 disconnectAudio()
             }
         }
@@ -725,28 +708,6 @@ class PodsService :
         val sharedPreferences = this.sharedPreferences ?: return
         config =
             ServiceConfig(
-                earDetectionEnabled =
-                    sharedPreferences.getBoolean(Constants.KEY_AUTOMATIC_EAR_DETECTION, true),
-                conversationalAwarenessPauseMusic =
-                    sharedPreferences.getBoolean(
-                        Constants.KEY_CONVERSATIONAL_AWARENESS_PAUSE_MUSIC,
-                        false,
-                    ),
-                relativeConversationalAwarenessVolume =
-                    sharedPreferences.getBoolean(
-                        Constants.KEY_RELATIVE_CONVERSATIONAL_AWARENESS_VOLUME,
-                        true,
-                    ),
-                headGestures = sharedPreferences.getBoolean(Constants.KEY_HEAD_GESTURES, true),
-                disconnectWhenNotWearing =
-                    sharedPreferences.getBoolean(Constants.KEY_DISCONNECT_WHEN_NOT_WEARING, false),
-                conversationalAwarenessVolume =
-                    sharedPreferences.getInt(Constants.KEY_CONVERSATIONAL_AWARENESS_VOLUME, 43),
-                useAlternatePackets =
-                    sharedPreferences.getBoolean(
-                        Constants.KEY_USE_ALTERNATE_HEAD_TRACKING_PACKETS,
-                        false,
-                    ),
                 leftSinglePressAction =
                     StemAction.fromString(
                         sharedPreferences.getString(
@@ -817,19 +778,6 @@ class PodsService :
         if (preferences == null || key == null) return
         val config = config ?: return
         when (key) {
-            Constants.KEY_AUTOMATIC_EAR_DETECTION ->
-                config.earDetectionEnabled = preferences.getBoolean(key, true)
-            Constants.KEY_CONVERSATIONAL_AWARENESS_PAUSE_MUSIC ->
-                config.conversationalAwarenessPauseMusic = preferences.getBoolean(key, false)
-            Constants.KEY_RELATIVE_CONVERSATIONAL_AWARENESS_VOLUME ->
-                config.relativeConversationalAwarenessVolume = preferences.getBoolean(key, true)
-            Constants.KEY_HEAD_GESTURES -> config.headGestures = preferences.getBoolean(key, true)
-            Constants.KEY_DISCONNECT_WHEN_NOT_WEARING ->
-                config.disconnectWhenNotWearing = preferences.getBoolean(key, false)
-            Constants.KEY_CONVERSATIONAL_AWARENESS_VOLUME ->
-                config.conversationalAwarenessVolume = preferences.getInt(key, 43)
-            Constants.KEY_USE_ALTERNATE_HEAD_TRACKING_PACKETS ->
-                config.useAlternatePackets = preferences.getBoolean(key, false)
             Constants.KEY_LEFT_SINGLE_PRESS_ACTION -> {
                 config.leftSinglePressAction =
                     StemAction.fromString(
@@ -901,54 +849,75 @@ class PodsService :
                             ?: StemPressType.SINGLE_PRESS.name
                     )!!
             }
-            Constants.KEY_LOW_LATENCY_AUDIO -> {
-                if (isLowLatencySupported()) {
-                    currentDevice?.setLowLatencyAudioAllowed(preferences.getBoolean(key, false))
+        }
+    }
+
+    private val adapterStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
+                    availableDevices.clear()
+                    detachDevice()
+                    stopSelf()
                 }
             }
         }
     }
 
-    private val ancModeFilter = IntentFilter(Constants.ACTION_SET_ANC_MODE).apply {
-        addAction(Constants.ACTION_SET_ACCESSORY_OPTION)
+    private fun cycleListeningMode() {
+        val state = AccessoryControls.state.value
+        val address = state.address ?: return
+        val mode = (1..4).asSequence().map { (state.mode + it - 1) % 4 + 1 }
+            .firstOrNull(state::supportsMode) ?: return
+        AccessoryControls.request(address, state.session, Control.LISTENING_MODE, mode)
     }
-    val ancModeReceiver: BroadcastReceiver =
-        object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent == null) return
-                val device = currentDevice ?: return
-                if (device.bondState != BluetoothDevice.BOND_BONDED || BluetoothConnectionManager.currentSocket?.remoteDevice != device) return
-                val state = AccessoryControls.state.value
-                if (!state.connected || state.address != device.address) return
-                val explicitAddress = intent.getStringExtra(Constants.PARAM_MAC_ADDRESS)
-                val sent = when (intent.action) {
-                    Constants.ACTION_SET_ACCESSORY_OPTION -> {
-                        if (explicitAddress != state.address || !intent.hasExtra(Constants.EXTRA_OPTION_ENABLED)) return
-                        val key = intent.getStringExtra(Constants.EXTRA_OPTION_KEY) ?: return
-                        if (!state.enables(key)) return
-                        val id = when (key) {
-                            Constants.KEY_PERSONALIZED_VOLUME -> AACPManager.ControlCommandIdentifiers.ADAPTIVE_VOLUME_CONFIG
-                            Constants.KEY_CONVERSATIONAL_AWARENESS -> AACPManager.ControlCommandIdentifiers.CONVERSATION_DETECT_CONFIG
-                            else -> return
-                        }
-                        AACPManager.sendControlCommand(id.value, intent.getBooleanExtra(Constants.EXTRA_OPTION_ENABLED, false))
-                    }
-                    Constants.ACTION_SET_ANC_MODE -> {
-                        val mode = if (intent.hasExtra(Constants.EXTRA_MODE)) {
-                            if (explicitAddress != state.address) return
-                            intent.getIntExtra(Constants.EXTRA_MODE, -1)
-                        } else {
-                            if (!hasStandardModel) return
-                            (1..4).map { (state.mode + it - 1) % 4 + 1 }.firstOrNull(state::supportsMode) ?: return
-                        }
-                        if (!state.supportsMode(mode)) return
-                        AACPManager.sendControlCommand(AACPManager.ControlCommandIdentifiers.LISTENING_MODE.value, mode)
-                    }
-                    else -> return
+
+    private fun writeControl(socket: BluetoothSocket, device: BluetoothDevice, control: Control, value: Int): Boolean {
+        if (activeSocket !== socket || BluetoothConnectionManager.currentSocket !== socket ||
+            currentDevice != device || device.bondState != BluetoothDevice.BOND_BONDED ||
+            bluetoothAdapter?.isEnabled != true
+        ) return false
+        if (control == Control.LOW_LATENCY_AUDIO) return device.setLowLatencyAudioAllowed(value == 1)
+        val wire = control.wire ?: return true // Other host controls are applied from the shared state.
+        val payload = AccessoryControls.encode(AccessoryControls.state.value, control, value) ?: return false
+        val packet = AACPManager.createDataPacket(AACPManager.createControlCommandPacket(wire.value, payload))
+        if (!AACPManager.sendPacket(packet, socket)) return false
+        AACPManager.sendPacket(AACPManager.createDataPacket(AACPManager.createRequestNotificationPacket()), socket)
+        return true
+    }
+
+    private fun onAacpLink(socket: BluetoothSocket, connected: Boolean) {
+        val device = currentDevice ?: return
+        if (socket.remoteDevice != device) return
+        if (connected) {
+            if (BluetoothConnectionManager.currentSocket !== socket || device.bondState != BluetoothDevice.BOND_BONDED) return
+            reconnectJob?.cancel()
+            activeSocket = socket
+            activeSession = AccessoryControls.link(device.address) { control, value -> writeControl(socket, device, control, value) } ?: return
+            val state = AccessoryControls.state.value
+            if (state.supports(Control.LOW_LATENCY_AUDIO)) {
+                device.setLowLatencyAudioAllowed(state.value(Control.LOW_LATENCY_AUDIO) == 1)
+            }
+            setupStemActions()
+        } else if (activeSocket === socket) {
+            activeSocket = null
+            activeSession = 0L
+            AccessoryControls.link(device.address, null)
+            AACPManager.disconnected()
+            batterySourceSocket = null
+            isHeadTrackingActive = false
+            gestureDetector?.stopDetection()
+            MediaController.stopSpeaking(immediate = true)
+            earDetectNotif = AirPodsNotifications.EarDetection()
+            val manager = bluetoothSocketManager ?: return
+            reconnectJob = serviceScope.launch(Dispatchers.Main) {
+                delay(750)
+                if (bluetoothSocketManager === manager && bluetoothAdapter?.isEnabled == true && device.isConnected) {
+                    manager.connectToSocket(device)
                 }
-                if (sent) AACPManager.sendNotificationRequest()
             }
         }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -974,21 +943,11 @@ class PodsService :
 
         AACPManager.setPacketCallback(this)
 
-        bluetoothSocketManager =
-            BluetoothSocketManager(
-                serviceScope,
-                { startHeadTracking() },
-                { stopHeadTracking() },
-                { setupStemActions() },
-                { address, connected -> AccessoryControls.link(address, connected) },
-            )
 
-        registerReceiver(ancModeReceiver, ancModeFilter, RECEIVER_NOT_EXPORTED)
+        registerReceiver(adapterStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), RECEIVER_EXPORTED)
         registerReceiver(shutdownReceiver, shutdownFilter, RECEIVER_NOT_EXPORTED)
         registerReceiver(sdpReceiver, IntentFilter(DeviceIdentificationSdp.ACTION_RECORD), RECEIVER_EXPORTED)
 
-        bleManager = BLEManager(this, keyStorageManager!!)
-        bleManager?.setAirPodsStatusListener(this)
 
         cameraStateMonitor = CameraStateMonitor(this)
         cameraStateMonitor?.onCreate()
@@ -998,44 +957,95 @@ class PodsService :
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val device =
             intent?.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                ?: return START_STICKY
+                ?: return START_NOT_STICKY
 
-        if (currentDevice == null && intent?.action == Constants.ACTION_CONNECTED) {
-            if (device.bondState != BluetoothDevice.BOND_BONDED) return START_NOT_STICKY
-            currentDevice = device
-            val services = device.uuids
-            airohaService = services != null && Constants.PODS_UUID in services && AIROHA_SERVICE in services
-            AccessoryControls.begin(device.address, getSharedPreferences())
-            updatePodsStatus(device)
-            bluetoothAdapter?.addOnMetadataChangedListener(device, mainExecutor, this)
-            serviceScope.launch { bluetoothSocketManager?.connectToSocket(device) }
-            connect()
-            bleManager?.startScanning(device)
-            if (!DeviceIdentificationSdp.request(device)) maybeProbeGatt(device)
-            return START_STICKY
+        when (intent.action) {
+            Constants.ACTION_CONNECTED -> {
+                if (device.bondState != BluetoothDevice.BOND_BONDED || bluetoothAdapter?.isEnabled != true) return START_NOT_STICKY
+                availableDevices[device.address] = device
+                if (currentDevice == null) attachDevice(device)
+                else if (currentDevice == device) bluetoothSocketManager?.connectToSocket(device)
+            }
+            Constants.ACTION_DISCONNECTED -> {
+                availableDevices.remove(device.address)
+                if (currentDevice == device) {
+                    detachDevice()
+                    val replacement = availableDevices.values.firstOrNull { it.bondState == BluetoothDevice.BOND_BONDED && it.isConnected }
+                    if (replacement == null) stopSelfResult(startId) else attachDevice(replacement)
+                }
+            }
+            Constants.ACTION_NAME_CHANGED -> if (currentDevice == device && hasStandardModel) {
+                setName(device, intent.getStringExtra(BluetoothDevice.EXTRA_NAME))
+            }
         }
+        return START_NOT_STICKY
+    }
 
-        if (
-            currentDevice != null &&
-                currentDevice?.equals(device) == true &&
-                intent?.action == Constants.ACTION_NAME_CHANGED &&
-                hasStandardModel
-        ) {
-            val name: String? = intent.getStringExtra(BluetoothDevice.EXTRA_NAME)
-            setName(device, name)
-            return START_STICKY
+    private fun attachDevice(device: BluetoothDevice) {
+        currentDevice = device
+        val services = device.uuids
+        airohaService = services != null && Constants.PODS_UUID in services && AIROHA_SERVICE in services
+        AccessoryControls.begin(device.address, getSharedPreferences(), isLowLatencySupported()) { timer, delay ->
+            handler.postDelayed(timer, delay)
         }
+        updatePodsStatus(device)
+        bluetoothAdapter?.addOnMetadataChangedListener(device, mainExecutor, this)
+        bluetoothSocketManager = BluetoothSocketManager(
+            serviceScope,
+            { socket, connected -> handler.post { onAacpLink(socket, connected) } },
+            { socket, packet ->
+                handler.post {
+                    if (activeSocket === socket && BluetoothConnectionManager.currentSocket === socket &&
+                        currentDevice?.bondState == BluetoothDevice.BOND_BONDED
+                    ) AACPManager.receivePacket(packet)
+                }
+            },
+        )
+        bleManager = BLEManager(this, keyStorageManager!!).also { it.setAirPodsStatusListener(this) }
+        bluetoothSocketManager?.connectToSocket(device)
+        connect()
+        bleManager?.startScanning(device)
+        if (!DeviceIdentificationSdp.request(device)) maybeProbeGatt(device)
+    }
 
-        if (
-            currentDevice != null &&
-                currentDevice?.equals(device) == true &&
-                intent?.action == Constants.ACTION_DISCONNECTED
-        ) {
-            stopSelf()
-            return START_STICKY
-        }
-
-        return START_STICKY
+    private fun detachDevice() {
+        val device = currentDevice ?: return
+        currentDevice = null
+        AccessoryControls.end(device.address)
+        activeSocket = null
+        activeSession = 0L
+        reconnectJob?.cancel()
+        reconnectJob = null
+        bluetoothSocketManager?.disconnect()
+        bluetoothSocketManager = null
+        AACPManager.disconnected()
+        bleManager?.stopScanning()
+        bleManager = null
+        bluetoothAdapter?.removeOnMetadataChangedListener(device, this)
+        deviceInformationGatt?.close()
+        deviceInformationGatt = null
+        uuidReceiver?.onDestroy()
+        a2dpReceiver?.onDestroy()
+        incomingCallJob?.cancel()
+        isHeadTrackingActive = false
+        gestureDetector?.stopDetection()
+        MediaController.stopSpeaking(immediate = true)
+        discoveryPublished = false
+        isSliceSet = false
+        publishedModel = null
+        reportedModel = null
+        accessoryModel = null
+        sdpModel = null
+        gattModel = null
+        profileModel = null
+        hasVerifiedModel = false
+        publishedAsVerified = false
+        hasSplitBattery = false
+        batterySourceSocket = null
+        disconnectedBecauseReversed = false
+        earDetectNotif = AirPodsNotifications.EarDetection()
+        batteryNotif = AirPodsNotifications.BatteryNotification()
+        conversAwareNotif = AirPodsNotifications.ConversationalAwarenessNotification()
     }
 
     fun connect() {
@@ -1049,17 +1059,15 @@ class PodsService :
 
     private fun connectToA2dpProfile(device: BluetoothDevice) {
         val bluetoothAdapter = bluetoothAdapter ?: return
+        val socketManager = bluetoothSocketManager ?: return
 
         bluetoothAdapter.getProfileProxy(
             this,
             object : BluetoothProfile.ServiceListener {
                 override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    if (profile == BluetoothProfile.A2DP) {
-                        val connectedDevices = proxy.connectedDevices
-                        if (connectedDevices.contains(device)) {
-                            serviceScope.launch { bluetoothSocketManager?.connectToSocket(device) }
-                        }
-                    }
+                    if (profile == BluetoothProfile.A2DP && bluetoothSocketManager === socketManager &&
+                        device in proxy.connectedDevices
+                    ) socketManager.connectToSocket(device)
                     bluetoothAdapter.closeProfileProxy(profile, proxy)
                 }
 
@@ -1069,16 +1077,6 @@ class PodsService :
         )
     }
 
-    fun setEarDetection(enabled: Boolean) {
-        val config = config ?: return
-
-        if (config.earDetectionEnabled == enabled) return
-        config.earDetectionEnabled = enabled
-        sharedPreferences?.edit {
-            putBoolean(Constants.KEY_AUTOMATIC_EAR_DETECTION, enabled)
-            apply()
-        }
-    }
 
     override fun onCameraOpened() {
         cameraActive = true
@@ -1094,7 +1092,7 @@ class PodsService :
         action != null && default != null && action != default
 
     fun setupStemActions() {
-        if (!hasStandardModel) return
+        if (!AccessoryControls.state.value.hasStemConfig()) return
         val config = config ?: return
 
         val singlePressDefault = StemAction.defaultActions[StemPressType.SINGLE_PRESS]
@@ -1137,52 +1135,11 @@ class PodsService :
     @Synchronized
     fun connectAudio() {
         val device = currentDevice ?: return
-        val bluetoothAdapter = bluetoothAdapter ?: return
-
-        bluetoothAdapter?.getProfileProxy(
-            this,
-            object : BluetoothProfile.ServiceListener {
-                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    if (profile == BluetoothProfile.A2DP) {
-                        try {
-                            device?.connect()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error connecting A2DP", e)
-                        } finally {
-                            bluetoothAdapter.closeProfileProxy(BluetoothProfile.A2DP, proxy)
-                            MediaController.sendPlay()
-                        }
-                    }
-                }
-
-                override fun onServiceDisconnected(profile: Int) {
-                    Log.d(TAG, "A2DP service disconnected")
-                }
-            },
-            BluetoothProfile.A2DP,
-        )
-
-        bluetoothAdapter?.getProfileProxy(
-            this,
-            object : BluetoothProfile.ServiceListener {
-                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    if (profile == BluetoothProfile.HEADSET) {
-                        try {
-                            device?.connect()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error connecting HEADSET", e)
-                        } finally {
-                            bluetoothAdapter.closeProfileProxy(BluetoothProfile.HEADSET, proxy)
-                        }
-                    }
-                }
-
-                override fun onServiceDisconnected(profile: Int) {
-                    Log.d(TAG, "HEADSET service disconnected")
-                }
-            },
-            BluetoothProfile.HEADSET,
-        )
+        try {
+            device.connect()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error connecting audio profiles", e)
+        }
     }
 
     @Synchronized
@@ -1199,7 +1156,7 @@ class PodsService :
     }
 
     override fun onDestroy() {
-        currentDevice?.let { AccessoryControls.end(it.address) }
+        detachDevice()
         sharedPreferences?.unregisterOnSharedPreferenceChangeListener(this)
 
         cameraStateMonitor?.unregisterListener(this)
@@ -1207,13 +1164,10 @@ class PodsService :
         cameraStateMonitor = null
 
         unregisterReceiver(shutdownReceiver)
-        unregisterReceiver(ancModeReceiver)
+        unregisterReceiver(adapterStateReceiver)
+        AACPManager.setPacketCallback(null)
+        handler.removeCallbacksAndMessages(null)
         unregisterReceiver(sdpReceiver)
-        deviceInformationGatt?.close()
-
-        bleManager?.stopScanning()
-
-        bluetoothSocketManager?.disconnect()
         gestureDetector?.release()
         inputManager = null
 
@@ -1225,8 +1179,6 @@ class PodsService :
         gestureDetector = null
         telephonyManager?.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE)
         telephonyManager = null
-        currentDevice?.let { bluetoothAdapter?.removeOnMetadataChangedListener(it, this) }
-        currentDevice = null
         telecomManager = null
         bluetoothAdapter = null
         uuidReceiver?.onDestroy()
@@ -1235,28 +1187,31 @@ class PodsService :
         a2dpReceiver = null
         keyStorageManager = null
 
-        AACPManager.disconnected()
-
         serviceScope.cancel()
 
         super.onDestroy()
     }
 
-    @Synchronized
-    fun startHeadTracking() {
-        if (!AccessoryControls.state.value.allows(AccessoryControls.HEAD_GESTURES)) return
-        val config = config ?: return
+    private fun startHeadTracking(): Boolean {
+        val state = AccessoryControls.state.value
+        if (!state.supports(Control.HEAD_GESTURES)) return false
+        if (isHeadTrackingActive) return true
+        val socket = activeSocket ?: return false
+        val alternate = state.value(Control.ALTERNATE_HEAD_TRACKING_PACKETS) == 1
+        val packet = AACPManager.createDataPacket(AACPManager.createStartHeadTrackingPacket(alternate))
+        if (!AACPManager.sendPacket(packet, socket)) return false
+        headTrackingUsesAlternatePackets = alternate
         isHeadTrackingActive = true
-        AACPManager.sendStartHeadTracking(config.useAlternatePackets)
         HeadTracking.reset()
+        return true
     }
 
-    @Synchronized
-    fun stopHeadTracking() {
+    private fun stopHeadTracking() {
         if (!isHeadTrackingActive) return
-        val config = config ?: return
-        AACPManager.sendStopHeadTracking(config.useAlternatePackets)
         isHeadTrackingActive = false
+        val socket = activeSocket ?: return
+        val packet = AACPManager.createDataPacket(AACPManager.createStopHeadTrackingPacket(headTrackingUsesAlternatePackets))
+        AACPManager.sendPacket(packet, socket)
     }
 
     private fun resToFile(resId: Int): File? {
@@ -1346,8 +1301,7 @@ class PodsService :
                     COMPANION_TYPE_NONE,
                 )
             }
-            BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI,
-            Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS -> {
+            BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI -> {
                 sendSliceSetupIntent(device, key)
             }
         }
@@ -1361,7 +1315,6 @@ class PodsService :
             )
         ret = device.setMetadataString(BluetoothDevice.METADATA_SOFTWARE_VERSION, COMPANION_TYPE_NONE) && ret
         sendSliceSetupIntent(device, BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI)
-        sendSliceSetupIntent(device, Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS)
 
         return ret
     }
@@ -1393,22 +1346,22 @@ class PodsService :
             ) && ret
         ret = device.setMetadataBoolean(BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET, true) && ret
         ret =
-            device.setMetadataInt(
+            device.setBatteryThresholdMetadata(
                 BluetoothDevice.METADATA_MAIN_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
             ) && ret
         ret =
-            device.setMetadataInt(
+            device.setBatteryThresholdMetadata(
                 BluetoothDevice.METADATA_UNTETHERED_LEFT_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
             ) && ret
         ret =
-            device.setMetadataInt(
+            device.setBatteryThresholdMetadata(
                 BluetoothDevice.METADATA_UNTETHERED_RIGHT_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
             ) && ret
         ret =
-            device.setMetadataInt(
+            device.setBatteryThresholdMetadata(
                 BluetoothDevice.METADATA_UNTETHERED_CASE_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
             ) && ret
@@ -1438,15 +1391,8 @@ class PodsService :
     }
 
     private fun setRegularPodsIcon(device: BluetoothDevice, key: Int, drawable: Int): Boolean {
-        if (drawable != 0) {
-            val uri = getIconUri(drawable) ?: return false
-            return device.setMetadataUri(key, uri)
-        }
-
-        // Leave other providers' artwork alone; an empty value removes our old override.
-        val previous = device.getMetadata(key) ?: return true
-        if (Uri.parse(previous.decodeToString()).authority != Constants.AUTHORITY_FILE) return true
-        return device.setMetadataValue(key, byteArrayOf())
+        val uri = if (drawable == 0) null else getIconUri(drawable) ?: return false
+        return device.setPodsIconMetadata(key, uri)
     }
 
     private fun setSinglePodsMetadata(
@@ -1461,12 +1407,12 @@ class PodsService :
         ret =
             device.setMetadataValue(
                 BluetoothDevice.METADATA_DEVICE_TYPE,
-                BluetoothDevice.DEVICE_TYPE_UNTETHERED_HEADSET.toByteArray(),
+                BluetoothDevice.DEVICE_TYPE_HEADSET.toByteArray(),
             ) && ret
-        ret = device.setMetadataBoolean(BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET, true) && ret
+        ret = device.setMetadataBoolean(BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET, false) && ret
         ret = device.setMetadataString(BluetoothDevice.METADATA_MODEL_NAME, metadata.model) && ret
         ret =
-            device.setMetadataInt(
+            device.setBatteryThresholdMetadata(
                 BluetoothDevice.METADATA_MAIN_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
             ) && ret
@@ -1474,7 +1420,11 @@ class PodsService :
     }
 
     override fun onMetadataChanged(device: BluetoothDevice, key: Int, value: ByteArray?) {
-        if (currentDevice?.equals(device) != true) return
+        if (currentDevice != device) return
+        if (key == Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS && profileModel != null) {
+            discoveryPublished = device.publishDeviceSettingsDiscovery()
+            return
+        }
         if (isSliceSet) {
             restoreInitialMetadata(device, key)
         }
@@ -1504,6 +1454,7 @@ class PodsService :
             else -> null
         }
         if (!isSliceSet) isSliceSet = setInitialMetadata(device)
+        if (model != null && !discoveryPublished) discoveryPublished = device.publishDeviceSettingsDiscovery()
         if (presentation == null) return
 
         val verified = hasVerifiedModel && !airohaService
@@ -1538,55 +1489,13 @@ class PodsService :
         if (!publishBattery) return
 
         val batteries = batteryNotif.getBattery()
-        val batteryUnified: Int
-        val chargingMain: Boolean
         val splitBattery = if (batterySourceSocket != null && batterySourceSocket === BluetoothConnectionManager.currentSocket) {
             batteryNotif.hasSplitBattery
         } else {
             model?.let { !it.isSingle } ?: hasSplitBattery
         }
-        if (splitBattery) {
-            val (left, right, case) = batteries
-            val leftCharging = left.status == BatteryStatus.CHARGING
-            val rightCharging = right.status == BatteryStatus.CHARGING
-            val caseCharging = case.status == BatteryStatus.CHARGING
-            val leftBattery = left.level
-            val rightBattery = right.level
-            val caseBattery = case.level
-
-            device.setMetadataBoolean(
-                BluetoothDevice.METADATA_UNTETHERED_LEFT_CHARGING,
-                leftCharging,
-            )
-            device.setMetadataBoolean(
-                BluetoothDevice.METADATA_UNTETHERED_RIGHT_CHARGING,
-                rightCharging,
-            )
-            device.setMetadataBoolean(
-                BluetoothDevice.METADATA_UNTETHERED_CASE_CHARGING,
-                caseCharging,
-            )
-            device.setMetadataInt(BluetoothDevice.METADATA_UNTETHERED_LEFT_BATTERY, leftBattery)
-            device.setMetadataInt(BluetoothDevice.METADATA_UNTETHERED_RIGHT_BATTERY, rightBattery)
-            device.setMetadataInt(BluetoothDevice.METADATA_UNTETHERED_CASE_BATTERY, caseBattery)
-
-            chargingMain = (leftBattery >= 0 || rightBattery >= 0) &&
-                (leftBattery < 0 || leftCharging) && (rightBattery < 0 || rightCharging)
-            batteryUnified = when {
-                leftBattery < 0 -> rightBattery
-                rightBattery < 0 -> leftBattery
-                else -> minOf(leftBattery, rightBattery)
-            }
-        } else {
-            val headset = batteries[3]
-            chargingMain = headset.status == BatteryStatus.CHARGING
-            batteryUnified = headset.level
-        }
-
-        device.setMetadataBoolean(BluetoothDevice.METADATA_MAIN_CHARGING, chargingMain)
-        device.setMetadataInt(BluetoothDevice.METADATA_MAIN_BATTERY, batteryUnified)
-
-        if (batteryUnified >= 0) broadcastHfIndicatorEventIntent(batteryUnified, device)
+        val batteryUnified = batteryMetadata.publish(device, batteries, splitBattery)
+        if (batteryUnified in 0..100) broadcastHfIndicatorEventIntent(batteryUnified, device)
     }
 
     // Send broadcasts to Android Settings Intelligence, Bluetooth app, System Settings

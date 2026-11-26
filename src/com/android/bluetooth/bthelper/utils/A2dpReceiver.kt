@@ -82,6 +82,7 @@ class A2dpReceiver(val listener: PodsA2dpListener) : BroadcastReceiver() {
         }
 
         _context?.unregisterReceiver(this)
+        isRegistered = false
         _context = null
         _device = null
         handler.removeCallbacksAndMessages(null)
