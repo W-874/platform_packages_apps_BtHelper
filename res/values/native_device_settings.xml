@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <string name="native_sound_controls">Sound controls</string>
+    <string name="native_press_controls">Touch and press controls</string>
+    <string name="native_advanced_controls">Advanced</string>
+    <string name="native_off_listening_mode">Allow Off listening mode</string>
+    <string name="native_one_bud_anc">Noise cancellation with one earbud</string>
+    <string name="native_volume_swipe">Swipe to adjust volume</string>
+    <string name="native_case_tones">Charging case sounds</string>
+    <string name="native_press_speed">Press speed</string>
+    <string name="native_press_hold_duration">Press and hold duration</string>
+    <string name="native_press_default">Default</string>
+    <string name="native_press_slower">Slower</string>
+    <string name="native_press_slowest">Slowest</string>
+    <string name="native_press_longer">Longer</string>
+    <string name="native_press_longest">Longest</string>
+    <string name="native_sleep_detection">Pause media when falling asleep</string>
+    <string name="native_microphone">Microphone</string>
+    <string name="native_microphone_auto">Automatic</string>
+    <string name="native_left">Left</string>
+    <string name="native_right">Right</string>
+    <string name="native_left_press_hold">Left earbud press and hold</string>
+    <string name="native_right_press_hold">Right earbud press and hold</string>
+    <string name="native_siri" translatable="false">Siri</string>
+    <string name="native_volume_swipe_duration">Volume swipe duration</string>
+    <string name="native_chime_volume">Tone volume</string>
+    <string name="native_crown_reversed">Reverse Digital Crown volume direction</string>
+    <string name="native_accessory_ear_detection">Headset ear detection</string>
+    <string name="native_auto_connect">Connect automatically</string>
+    <string name="native_conversation_volume">Conversation volume</string>
+    <string name="native_adaptive_noise_level">Adaptive noise level</string>
+    <string name="native_percent">%1$d%%</string>
+    <!-- %1$s is a listening mode name, for example “Transparency”. -->
+    <string name="native_cycle_mode">Include %1$s in press-and-hold cycle</string>
+    <string name="native_settings_footer">Controls depend on your headset. Some settings are only available after the headset connects and reports them.</string>
+</resources>

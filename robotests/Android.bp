@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+android_robolectric_test {
+    name: "BtHelperNativeSettingsRoboTests",
+    srcs: ["src/**/*.kt"],
+    instrumentation_for: "BtHelper",
+    associates: ["BtHelper"],
+    static_libs: ["androidx.test.core"],
+    strict_mode: false,
+}
