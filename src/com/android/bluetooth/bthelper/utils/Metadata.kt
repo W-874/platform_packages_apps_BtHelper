@@ -12,17 +12,15 @@ import com.android.bluetooth.bthelper.Constants.TAG
 import java.util.Locale
 
 fun BluetoothDevice.setMetadataValue(key: Int, value: ByteArray, force: Boolean = false): Boolean {
-    val isValueAlreadySet = this.getMetadata(key)?.contentEquals(value) == true
-    if (force || !isValueAlreadySet) {
-        try {
+    try {
+        if (force || this.getMetadata(key)?.contentEquals(value) != true) {
             val ret = this.setMetadata(key, value)
-            if (!ret) {
-                Log.w(TAG, "Failed to set metadata ${key}")
-            }
+            if (!ret) Log.w(TAG, "Failed to set metadata $key")
             return ret
-        } catch (e: Exception) {
-            Log.w(TAG, "Excepttion while setting metadata ${key}", e)
         }
+    } catch (e: Exception) {
+        Log.w(TAG, "Exception while updating metadata $key", e)
+        return false
     }
     return true
 }

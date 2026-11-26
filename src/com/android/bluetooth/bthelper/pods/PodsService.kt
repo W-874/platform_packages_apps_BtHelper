@@ -19,6 +19,7 @@ import android.bluetooth.BluetoothAdapter.OnMetadataChangedListener
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothSocket
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -181,7 +182,7 @@ class PodsService :
         }
     }
     private var hasSplitBattery = false
-    private var hasAacpBattery = false
+    private var batterySourceSocket: BluetoothSocket? = null
     private var airohaService = false
     private val airohaEarbuds = object : RegularPods() {
         override val model = "AirPods-compatible earbuds (Airoha)"
@@ -278,7 +279,7 @@ class PodsService :
         }
         hasSplitBattery = hasSplitBattery || status.model?.isSingle == false ||
             status.leftBattery >= 0 || status.rightBattery >= 0 || status.caseBattery >= 0
-        if (!hasAacpBattery) {
+        if (batterySourceSocket == null || batterySourceSocket !== BluetoothConnectionManager.currentSocket) {
             batteryNotif.setBatteryDirect(
                 leftLevel = status.leftBattery,
                 leftCharging = status.isLeftCharging,
@@ -308,7 +309,7 @@ class PodsService :
         }
         val controls = AccessoryControls.state.value
         writer.println("Model: ${publishedModel?.model} (source=$source, Airoha service=$airohaService)")
-        writer.println("AACP connected=${controls.connected}, battery=$hasAacpBattery, declared=${controls.declared}, learned=${controls.learned}, mode=${controls.mode}, verified BLE=$hasVerifiedModel")
+        writer.println("AACP connected=${controls.connected}, battery=${batterySourceSocket != null}, declared=${controls.declared}, learned=${controls.learned}, mode=${controls.mode}, verified BLE=$hasVerifiedModel")
     }
 
     private fun handleCallStateChange(state: Int) {
@@ -390,8 +391,10 @@ class PodsService :
     @Synchronized
     override fun onBatteryInfoReceived(batteryInfo: ByteArray) {
         val device = currentDevice ?: return
+        val socket = BluetoothConnectionManager.currentSocket ?: return
+        if (socket.remoteDevice != device) return
         if (!batteryNotif.setBattery(batteryInfo)) return
-        hasAacpBattery = true
+        batterySourceSocket = socket
         hasSplitBattery = hasSplitBattery || batteryNotif.hasSplitBattery
         updatePodsStatus(device, publishBattery = true)
 
@@ -1356,8 +1359,7 @@ class PodsService :
                 BluetoothDevice.METADATA_COMPANION_APP,
                 Constants.AUTHORITY_BTHELPER,
             )
-        ret =
-            device.setMetadataString(BluetoothDevice.METADATA_SOFTWARE_VERSION, COMPANION_TYPE_NONE)
+        ret = device.setMetadataString(BluetoothDevice.METADATA_SOFTWARE_VERSION, COMPANION_TYPE_NONE) && ret
         sendSliceSetupIntent(device, BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI)
         sendSliceSetupIntent(device, Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS)
 
@@ -1383,33 +1385,33 @@ class PodsService :
                 BluetoothDevice.METADATA_MANUFACTURER_NAME,
                 metadata.manufacturer,
             )
-        ret = device.setMetadataString(BluetoothDevice.METADATA_MODEL_NAME, metadata.model)
+        ret = device.setMetadataString(BluetoothDevice.METADATA_MODEL_NAME, metadata.model) && ret
         ret =
             device.setMetadataValue(
                 BluetoothDevice.METADATA_DEVICE_TYPE,
                 BluetoothDevice.DEVICE_TYPE_UNTETHERED_HEADSET.toByteArray(),
-            )
-        ret = device.setMetadataBoolean(BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET, true)
+            ) && ret
+        ret = device.setMetadataBoolean(BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET, true) && ret
         ret =
             device.setMetadataInt(
                 BluetoothDevice.METADATA_MAIN_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
-            )
+            ) && ret
         ret =
             device.setMetadataInt(
                 BluetoothDevice.METADATA_UNTETHERED_LEFT_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
-            )
+            ) && ret
         ret =
             device.setMetadataInt(
                 BluetoothDevice.METADATA_UNTETHERED_RIGHT_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
-            )
+            ) && ret
         ret =
             device.setMetadataInt(
                 BluetoothDevice.METADATA_UNTETHERED_CASE_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
-            )
+            ) && ret
         ret =
             setRegularPodsIconMetadata(
                 device,
@@ -1417,7 +1419,7 @@ class PodsService :
                 metadata.leftDrawable,
                 metadata.rightDrawable,
                 metadata.caseDrawable,
-            )
+            ) && ret
         return ret
     }
 
@@ -1460,15 +1462,15 @@ class PodsService :
             device.setMetadataValue(
                 BluetoothDevice.METADATA_DEVICE_TYPE,
                 BluetoothDevice.DEVICE_TYPE_UNTETHERED_HEADSET.toByteArray(),
-            )
-        ret = device.setMetadataBoolean(BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET, true)
-        ret = device.setMetadataString(BluetoothDevice.METADATA_MODEL_NAME, metadata.model)
+            ) && ret
+        ret = device.setMetadataBoolean(BluetoothDevice.METADATA_IS_UNTETHERED_HEADSET, true) && ret
+        ret = device.setMetadataString(BluetoothDevice.METADATA_MODEL_NAME, metadata.model) && ret
         ret =
             device.setMetadataInt(
                 BluetoothDevice.METADATA_MAIN_LOW_BATTERY_THRESHOLD,
                 metadata.lowBattThreshold,
-            )
-        return setRegularPodsIconMetadata(device, metadata.drawable, 0, 0, 0)
+            ) && ret
+        return setRegularPodsIconMetadata(device, metadata.drawable, 0, 0, 0) && ret
     }
 
     override fun onMetadataChanged(device: BluetoothDevice, key: Int, value: ByteArray?) {
@@ -1493,9 +1495,9 @@ class PodsService :
             if (hasStandardModel) setupStemActions()
         }
         val presentation = model ?: when {
-            airohaService && hasAacpBattery && hasSplitBattery -> airohaEarbuds
+            airohaService && batterySourceSocket != null && hasSplitBattery -> airohaEarbuds
             hasSplitBattery -> genericEarbuds
-            hasAacpBattery -> genericHeadphones
+            batterySourceSocket != null -> genericHeadphones
             // Remove artwork left by the retired manual override when no model is known.
             publishedModel == null && device.getMetadata(BluetoothDevice.METADATA_MODEL_NAME)
                 ?.decodeToString() == "AirPods Pro 2 Compatible" -> genericEarbuds
@@ -1538,7 +1540,11 @@ class PodsService :
         val batteries = batteryNotif.getBattery()
         val batteryUnified: Int
         val chargingMain: Boolean
-        val splitBattery = reportedModel?.let { !it.isSingle } ?: hasSplitBattery
+        val splitBattery = if (batterySourceSocket != null && batterySourceSocket === BluetoothConnectionManager.currentSocket) {
+            batteryNotif.hasSplitBattery
+        } else {
+            model?.let { !it.isSingle } ?: hasSplitBattery
+        }
         if (splitBattery) {
             val (left, right, case) = batteries
             val leftCharging = left.status == BatteryStatus.CHARGING
