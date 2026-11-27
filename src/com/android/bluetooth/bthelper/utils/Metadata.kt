@@ -57,8 +57,18 @@ private val deviceSettingsDiscovery = DeviceSettingsDiscovery(
 
 internal fun BluetoothDevice.publishDeviceSettingsDiscovery(): Boolean =
     updateMetadata(Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS) { current ->
-        deviceSettingsDiscovery.merge(current, BluetoothDevice.METADATA_MAX_LENGTH)
+        if (bondState != BluetoothDevice.BOND_BONDED) return@updateMetadata null
+        val updated = deviceSettingsDiscovery.merge(current, BluetoothDevice.METADATA_MAX_LENGTH)
+            ?: return@updateMetadata null
+        // Bluetooth has no compare-and-set. Avoid a stale write if another owner has already
+        // changed key 25, and let its listener notification merge the latest snapshot instead.
+        updated.takeIf {
+            current.contentEquals(getMetadata(Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS))
+        }
     }
+
+internal fun BluetoothDevice.deviceSettingsAdvertisement(): DeviceSettingsDiscovery.Advertisement? =
+    deviceSettingsDiscovery.advertisement(getMetadata(Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS))
 
 internal fun BluetoothDevice.setBatteryThresholdMetadata(key: Int, threshold: Int): Boolean =
     threshold !in 0..100 || setMetadataInt(key, threshold)

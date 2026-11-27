@@ -16,7 +16,8 @@ import android.os.RemoteException
 import android.os.UserHandle
 import android.util.Log
 import com.android.bluetooth.bthelper.pods.AccessoryControls
-import com.android.settingslib.bluetooth.BluetoothUtils
+import com.android.bluetooth.bthelper.utils.DeviceSettingsDiscovery.Advertisement
+import com.android.bluetooth.bthelper.utils.deviceSettingsAdvertisement
 import com.android.settingslib.bluetooth.devicesettings.DeviceInfo
 import com.android.settingslib.bluetooth.devicesettings.DeviceSetting
 import com.android.settingslib.bluetooth.devicesettings.DeviceSettingConfigOptions
@@ -80,9 +81,12 @@ class BtHelperDeviceSettingsConfigService : Service() {
     private fun advertisesBtHelperConfig(address: String): Boolean {
         val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: return false
         val device = adapter.getRemoteDevice(address)
-        return device.bondState == BluetoothDevice.BOND_BONDED &&
-            BluetoothUtils.getFastPairCustomizedField(device, "DEVICE_SETTINGS_CONFIG_ACTION") ==
-                DEVICE_SETTINGS_CONFIG_ACTION
+        if (device.bondState != BluetoothDevice.BOND_BONDED) return false
+        return when (device.deviceSettingsAdvertisement()) {
+            Advertisement.DIRECT -> true
+            Advertisement.SECONDARY -> device.hasPodsService()
+            null -> false
+        }
     }
 }
 

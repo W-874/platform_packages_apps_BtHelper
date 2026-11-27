@@ -24,6 +24,9 @@ trap 'rm -r "$tmp"' EXIT
 "$kotlin/bin/kotlinc" -classpath "$classpath" \
     "$src/pods/AccessoryControls.kt" "$src/utils/AACPManager.kt" \
     "$src/utils/BluetoothConnectionManager.kt" "$base/tests/AccessoryControlsTest.kt" \
+    "$src/utils/DeviceSettingsDiscovery.kt" "$base/tests/host/DeviceSettingsDiscoveryTest.kt" \
     -d "$tmp/test.jar"
 "$JAVA_HOME/bin/java" -cp "$tmp/test.jar:$classpath:$kotlin/lib/kotlin-stdlib.jar" \
     com.android.bluetooth.bthelper.pods.AccessoryControlsTestKt
+"$JAVA_HOME/bin/java" -cp "$tmp/test.jar:$classpath:$kotlin/lib/kotlin-stdlib.jar" \
+    com.android.bluetooth.bthelper.utils.DeviceSettingsDiscoveryTestKt

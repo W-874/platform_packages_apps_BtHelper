@@ -21,6 +21,8 @@ import com.android.bluetooth.bthelper.pods.AccessoryControls
 import com.android.bluetooth.bthelper.pods.PodsService
 import com.android.bluetooth.bthelper.utils.BtActionsFilter
 
+internal fun BluetoothDevice.hasPodsService(): Boolean = uuids?.contains(Constants.PODS_UUID) == true
+
 class StartupReceiver : BroadcastReceiver() {
 
     init {
@@ -49,12 +51,8 @@ class StartupReceiver : BroadcastReceiver() {
         onPodsDetected(context, intent, device)
     }
 
-    private fun isPods(device: BluetoothDevice?): Boolean {
-        return device?.uuids?.contains(Constants.PODS_UUID) == true
-    }
-
     private fun onPodsDetected(context: Context, intent: Intent, device: BluetoothDevice) {
-        if (!isPods(device)) return
+        if (!device.hasPodsService()) return
 
         when (intent.action) {
             BluetoothDevice.ACTION_NAME_CHANGED -> maybeRenamePods(context, intent, device)

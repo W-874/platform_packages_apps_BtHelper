@@ -988,8 +988,9 @@ class PodsService :
         AccessoryControls.begin(device.address, getSharedPreferences(), isLowLatencySupported()) { timer, delay ->
             handler.postDelayed(timer, delay)
         }
-        updatePodsStatus(device)
         bluetoothAdapter?.addOnMetadataChangedListener(device, mainExecutor, this)
+        // Listen before the first read so a concurrent Fast Pair registration is observed.
+        updatePodsStatus(device)
         bluetoothSocketManager = BluetoothSocketManager(
             serviceScope,
             { socket, connected -> handler.post { onAacpLink(socket, connected) } },
@@ -1009,8 +1010,12 @@ class PodsService :
     }
 
     private fun detachDevice() {
-        val device = currentDevice ?: return
-        currentDevice = null
+        val device = synchronized(this) {
+            val device = currentDevice ?: return
+            currentDevice = null
+            discoveryPublished = false
+            device
+        }
         AccessoryControls.end(device.address)
         activeSocket = null
         activeSession = 0L
@@ -1030,7 +1035,6 @@ class PodsService :
         isHeadTrackingActive = false
         gestureDetector?.stopDetection()
         MediaController.stopSpeaking(immediate = true)
-        discoveryPublished = false
         isSliceSet = false
         publishedModel = null
         reportedModel = null
@@ -1419,10 +1423,12 @@ class PodsService :
         return setRegularPodsIconMetadata(device, metadata.drawable, 0, 0, 0) && ret
     }
 
+    @Synchronized
     override fun onMetadataChanged(device: BluetoothDevice, key: Int, value: ByteArray?) {
         if (currentDevice != device) return
-        if (key == Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS && profileModel != null) {
-            discoveryPublished = device.publishDeviceSettingsDiscovery()
+        if (key == Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS) {
+            // Treat the callback as a signal. It may describe an older payload than key 25 now has.
+            if (profileModel != null) discoveryPublished = device.publishDeviceSettingsDiscovery()
             return
         }
         if (isSliceSet) {

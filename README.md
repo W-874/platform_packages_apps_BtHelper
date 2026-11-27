@@ -30,10 +30,12 @@ Settings keeps the standard Bluetooth device preferences and hosts the native
 More Settings page. The provider reads and updates the existing PodsService
 session; binding does not open a connection to the headset.
 Discovery uses the three `DEVICE_SETTINGS_CONFIG_*` fragments in Bluetooth
-metadata key 25. BtHelper appends only missing fragments that agree with its
-endpoint, preserving other owners' fields and leaving conflicting or malformed
-data unchanged. The adapter no longer publishes Control Slice metadata; its
-separate legacy Settings shortcut remains available.
+metadata key 25. BtHelper appends missing fragments that agree with its own
+endpoint. For a supported bonded headset with the complete GMS Fast Pair
+endpoint, BtHelper instead appends `<BTHELPER_DEVICE_SETTINGS>1</BTHELPER_DEVICE_SETTINGS>`
+and preserves the original fields byte for byte. It leaves other providers and
+conflicting or malformed discovery fields alone. The adapter no longer publishes
+Control Slice metadata. Its separate legacy Settings shortcut remains available.
 
 BtHelper requests `LOCAL_MAC_ADDRESS` for AACP cross-device audio routing.
 It reads the adapter address only when routing needs it; a missing or redacted
@@ -93,8 +95,8 @@ To inspect the selected model, source and live session without exposing keys:
 `adb shell dumpsys activity service com.android.bluetooth.bthelper/.pods.PodsService`.
 
 After building `BtHelper`, run `packages/apps/BtHelper/tests/run-host-tests.sh`
-from the source tree to check report parsing, pending writes and bonded session
-isolation without a connected device.
+from the source tree to check Fast Pair discovery, report parsing, pending
+writes and bonded session isolation without a connected device.
 
 The SDP product IDs and AACP framing were cross-checked against MagicPodsCore's
 [model table](https://github.com/steam3d/MagicPodsCore/blob/04af4bd/src/sdk/aap/enums/AapModelIds.h)
