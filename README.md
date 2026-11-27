@@ -13,10 +13,10 @@ Only Apple AirPods series are supported by this project.<br>
 
 The local manifest tracks the downstream `uwu-17.0` branch, which carries the
 Android 17 adaptation. `vendor/uwu/config/common.mk` includes `BtHelper`;
-Soong also installs the required `BtHelperAdapter` and permission grants on
-`system_ext`. Use the normal product build and OTA packaging flow.
+Soong installs the APK and permission grants on `system_ext`. Use the normal
+product build and OTA packaging flow.
 
-Both APKs use the platform certificate and separate application UIDs. AACP
+BtHelper uses the platform certificate. AACP
 uses the platform's hidden BR/EDR L2CAP factory via one scoped method lookup
 because the factory is absent from the Bluetooth compile stubs. No per-package
 hidden API exemption is needed for platform-signed apps. `l2c_should_skip_ertm`
@@ -26,16 +26,18 @@ the upstream generic L2CAP fallback patch.
 Settings and SystemUI discover the native Bluetooth device settings services
 through standard Fast Pair customized metadata. Both clients request BtHelper's
 signature permission, `com.android.bluetooth.bthelper.permission.BIND_DEVICE_SETTINGS`.
-Settings keeps the standard Bluetooth device preferences and hosts the native
-More Settings page. The provider reads and updates the existing PodsService
-session; binding does not open a connection to the headset.
+Settings hosts listening mode, automatic ear detection, personalized volume and
+conversation awareness in Bluetooth device details. The native More Settings
+page hosts the remaining controls, including relative volume, head gestures and
+low-latency audio. The provider reads and updates the existing PodsService
+session. Binding does not open a connection to the headset.
 Discovery uses the three `DEVICE_SETTINGS_CONFIG_*` fragments in Bluetooth
 metadata key 25. BtHelper appends missing fragments that agree with its own
 endpoint. For a supported bonded headset with the complete GMS Fast Pair
 endpoint, BtHelper instead appends `<BTHELPER_DEVICE_SETTINGS>1</BTHELPER_DEVICE_SETTINGS>`
 and preserves the original fields byte for byte. It leaves other providers and
-conflicting or malformed discovery fields alone. The adapter no longer publishes
-Control Slice metadata. Its separate legacy Settings shortcut remains available.
+conflicting or malformed discovery fields alone. BtHelper clears the retired
+Adapter shortcut URI from its connected devices when upgrading from older builds.
 
 BtHelper requests `LOCAL_MAC_ADDRESS` for AACP cross-device audio routing.
 It reads the adapter address only when routing needs it; a missing or redacted
@@ -48,7 +50,7 @@ a second ATT socket during the AACP handshake; no active feature uses it.
 ### Compatibility telemetry
 
 The service is started by the existing bonded Bluetooth device identification
-path. The Adapter's More settings entry does not imply a successful AACP session.
+path. A recognized model or an active AACP link enables settings discovery.
 Apple manufacturer data with `07 13` and a 21-byte payload provides individual
 battery percentages and charging flags. It is accepted only for the active bonded
 headset's public address or its Android-resolved public identity. The standard
@@ -79,8 +81,8 @@ split AACP battery report identifies compatible earbuds, not their retail SKU.
 An identity-bound `07 13 01 14 20` advertisement identifies the short-format
 Pro 2 variant ([CAPod factory](https://github.com/d4rken-org/capod/blob/d7817d713691fa7601256eef6bdbdcf2cf0e8426/app/src/main/java/eu/darken/capod/pods/core/apple/ble/devices/misc/FakeAirPodsPro2.kt)).
 
-On a bonded AACP connection, native Settings and the app's preference page use
-the same session state and command path. An identified model can establish
+Native Settings uses the existing AACP session state and command path. An
+identified model can establish
 support, but never a current value. Additional settings are enabled only after
 a valid report for their documented payload. A write stays pending until a
 headset report or until it times out; timeout never changes the confirmed value.

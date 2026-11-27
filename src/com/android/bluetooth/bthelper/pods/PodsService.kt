@@ -85,6 +85,7 @@ import com.android.bluetooth.bthelper.utils.PodsA2dpListener
 import com.android.bluetooth.bthelper.utils.PodsUuidListener
 import com.android.bluetooth.bthelper.utils.StemAction
 import com.android.bluetooth.bthelper.utils.UuidReceiver
+import com.android.bluetooth.bthelper.utils.clearLegacySettingsSlice
 import com.android.bluetooth.bthelper.utils.isHeadTrackingData
 import com.android.bluetooth.bthelper.utils.models.AirPodsPro2Clone
 import com.android.bluetooth.bthelper.utils.models.IPods
@@ -164,7 +165,7 @@ class PodsService :
 
     private var currentDevice: BluetoothDevice? = null
 
-    @Volatile private var isSliceSet = false
+    @Volatile private var initialMetadataSet = false
     private var publishedModel: IPods? = null
     private var reportedModel: IPods? = null
     private var accessoryModel: IPods? = null
@@ -894,6 +895,7 @@ class PodsService :
             reconnectJob?.cancel()
             activeSocket = socket
             activeSession = AccessoryControls.link(device.address) { control, value -> writeControl(socket, device, control, value) } ?: return
+            if (!discoveryPublished) discoveryPublished = device.publishDeviceSettingsDiscovery()
             val state = AccessoryControls.state.value
             if (state.supports(Control.LOW_LATENCY_AUDIO)) {
                 device.setLowLatencyAudioAllowed(state.value(Control.LOW_LATENCY_AUDIO) == 1)
@@ -1036,7 +1038,7 @@ class PodsService :
         isHeadTrackingActive = false
         gestureDetector?.stopDetection()
         MediaController.stopSpeaking(immediate = true)
-        isSliceSet = false
+        initialMetadataSet = false
         publishedModel = null
         reportedModel = null
         accessoryModel = null
@@ -1306,32 +1308,18 @@ class PodsService :
                     COMPANION_TYPE_NONE,
                 )
             }
-            BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI -> {
-                sendSliceSetupIntent(device, key)
-            }
+            BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI -> device.clearLegacySettingsSlice()
         }
     }
 
     private fun setInitialMetadata(device: BluetoothDevice): Boolean {
-        var ret =
-            device.setMetadataString(
-                BluetoothDevice.METADATA_COMPANION_APP,
-                Constants.AUTHORITY_BTHELPER,
-            )
-        ret = device.setMetadataString(BluetoothDevice.METADATA_SOFTWARE_VERSION, COMPANION_TYPE_NONE) && ret
-        sendSliceSetupIntent(device, BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI)
-
-        return ret
-    }
-
-    private fun sendSliceSetupIntent(device: BluetoothDevice, key: Int) {
-        val sliceIntent: Intent =
-            Intent(Constants.ACTION_SET_SLICE).apply {
-                putExtra(BluetoothDevice.EXTRA_DEVICE, device)
-                putExtra(Constants.EXTRA_METADATA_KEY, key)
-                setPackage(Constants.PACKAGE_BTHELPER_ADAPTER)
-            }
-        sendBroadcast(sliceIntent)
+        val sliceCleared = device.clearLegacySettingsSlice()
+        val companionSet = device.setMetadataString(
+            BluetoothDevice.METADATA_COMPANION_APP,
+            Constants.AUTHORITY_BTHELPER,
+        )
+        return device.setMetadataString(BluetoothDevice.METADATA_SOFTWARE_VERSION, COMPANION_TYPE_NONE) &&
+            companionSet && sliceCleared
     }
 
     private fun setRegularPodsMetadata(
@@ -1429,10 +1417,12 @@ class PodsService :
         if (currentDevice != device) return
         if (key == Constants.METADATA_FAST_PAIR_CUSTOMIZED_FIELDS) {
             // Treat the callback as a signal. It may describe an older payload than key 25 now has.
-            if (profileModel != null) discoveryPublished = device.publishDeviceSettingsDiscovery()
+            if (profileModel != null || activeSession != 0L) {
+                discoveryPublished = device.publishDeviceSettingsDiscovery()
+            }
             return
         }
-        if (isSliceSet) {
+        if (initialMetadataSet) {
             restoreInitialMetadata(device, key)
         }
     }
@@ -1460,8 +1450,10 @@ class PodsService :
                 ?.decodeToString() == "AirPods Pro 2 Compatible" -> genericEarbuds
             else -> null
         }
-        if (!isSliceSet) isSliceSet = setInitialMetadata(device)
-        if (model != null && !discoveryPublished) discoveryPublished = device.publishDeviceSettingsDiscovery()
+        if (!initialMetadataSet) initialMetadataSet = setInitialMetadata(device)
+        if ((model != null || activeSession != 0L) && !discoveryPublished) {
+            discoveryPublished = device.publishDeviceSettingsDiscovery()
+        }
         if (presentation == null) return
 
         val verified = hasVerifiedModel && !airohaService

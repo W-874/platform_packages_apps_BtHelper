@@ -102,7 +102,18 @@ class NativeDeviceSettingsTest {
         })
         assertEquals("bluetooth_profiles", items.single { it.settingId == DeviceSettingId.DEVICE_SETTING_ID_BLUETOOTH_PROFILES }.preferenceKey)
         assertEquals("spatial_audio_group", items.single { it.settingId == DeviceSettingId.DEVICE_SETTING_ID_SPATIAL_AUDIO_MULTI_TOGGLE }.preferenceKey)
-        assertTrue(config.mainContentItems.any { it.settingId == NativeSettingIds.MORE_SETTINGS })
+        assertEquals(1, config.mainContentItems.count { it.settingId == NativeSettingIds.MORE_SETTINGS })
+        val mainIds = config.mainContentItems.map { it.settingId }
+        val moreIds = config.moreSettingsItems.map { it.settingId }
+        assertTrue(mainIds.containsAll(listOf(
+            NativeSettingIds.ANC, NativeSettingIds.AUTOMATIC_EAR_DETECTION,
+            NativeSettingIds.PERSONALIZED_VOLUME, NativeSettingIds.CONVERSATION_AWARENESS,
+        )))
+        assertTrue(moreIds.containsAll(listOf(
+            NativeSettingIds.PAUSE_MUSIC_WHEN_SPEAKING, NativeSettingIds.RELATIVE_CONVERSATION_VOLUME,
+            NativeSettingIds.HEAD_GESTURES, NativeSettingIds.DISCONNECT_WHEN_NOT_WEARING,
+            NativeSettingIds.ALTERNATE_HEAD_TRACKING_PACKETS, NativeSettingIds.LOW_LATENCY_AUDIO,
+        )))
     }
 
     @Test

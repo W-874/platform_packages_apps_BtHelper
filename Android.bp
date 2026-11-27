@@ -32,23 +32,17 @@ android_app {
     static_libs: [
         "androidx.core_core",
         "androidx.core_core-ktx",
-        "androidx.preference_preference",
-        "androidx.slice_slice-core",
-        "androidx.slice_slice-view",
-        "androidx.slice_slice-builders",
         "kotlin-stdlib",
         "kotlin-stdlib-jdk7",
         "androidx.compose.runtime_runtime",
         "kotlinx_coroutines_android",
         // SettingsLib supplies the device settings parcelables and generated Binder interfaces.
         "SettingsLib",
-        "SettingsLibSettingsTheme",
     ],
 
     resource_dirs: ["res", "res-apple"],
 
     required: [
-        "BtHelperAdapter",
         "default-permissions_com.android.bluetooth.bthelper",
     ],
 

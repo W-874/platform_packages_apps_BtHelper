@@ -245,7 +245,7 @@ internal object AccessoryControls {
         else -> byteArrayOf(control.toWire(value).toByte())
     }
 
-    /** Called on main by both Settings entry points; writes target the captured link, never the next one. */
+    /** Writes target the captured link, even if Settings sends an update during a reconnect. */
     @Synchronized fun request(address: String, session: Long, control: Control, value: Int): Boolean {
         val s = current.value
         if (s.address != address || s.session != session || !s.accepts(control, value) || s.pending(control) != null) return false

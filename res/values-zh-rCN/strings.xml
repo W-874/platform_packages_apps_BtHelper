@@ -6,14 +6,10 @@
   License-Filename: LICENSE
 -->
 <resources>
-    <string name="settings_title">更多设置</string>
-    <string name="more_settings_subtitle">相对音量、入耳检测等</string>
     <string name="listening_mode_title">聆听模式</string>
     <string-array name="listening_modes">
         <item>关闭</item><item>降噪</item><item>通透</item><item>自适应</item>
     </string-array>
-    <string name="accessory_state_unknown">未知</string>
-    <string name="accessory_option_unknown">%1$s\n耳机尚未回报当前状态。</string>
     <string name="automatic_ear_detection_title">自动入耳检测</string>
     <string name="personalized_volume_title">个性化音量</string>
     <string name="personalized_volume_summary">根据周围环境调整媒体音量。</string>
@@ -30,7 +26,6 @@
     <string name="disconnect_when_not_wearing_title">未佩戴时断开连接</string>
     <string name="low_latency_audio_title">低延迟音频</string>
     <string name="low_latency_audio_summary">减少音频延迟。\n开启后需要重新连接 AirPods，可能会增加耗电。</string>
-    <string name="low_latency_audio_slice_subtitle">需要重新连接 AirPods。</string>
     <string name="head_gesture_call_answered_toast">已通过头部手势接听来电</string>
     <string name="head_gesture_call_rejected_toast">已通过头部手势拒接来电</string>
 </resources>

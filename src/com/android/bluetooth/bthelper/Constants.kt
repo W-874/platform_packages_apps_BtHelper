@@ -15,27 +15,6 @@ object Constants {
     /* Authority (package name) */
     const val AUTHORITY_BTHELPER: String = "com.android.bluetooth.bthelper"
     const val AUTHORITY_FILE: String = AUTHORITY_BTHELPER + ".fileprovider"
-    const val PACKAGE_BTHELPER_ADAPTER: String = AUTHORITY_BTHELPER + ".adapter"
-
-    /* Slices Paths */
-    const val PATH_BTHELPER: String = "bthelper"
-    const val SLICE_BTHELPER: String = "/" + PATH_BTHELPER
-    const val PARAM_MAC_ADDRESS: String = "address"
-
-    /* Slices Type */
-    const val SLICE_TOGGLE: Int = 101
-    const val SLICE_MAIN: Int = 102
-
-    /* Slices Intent Action */
-    const val ACTION_PENDING_INTENT: String = AUTHORITY_BTHELPER + ".ACTION_PENDING_INTENT"
-
-    /* Slices Intent Extra */
-    const val EXTRA_NONE: Int = 0
-    const val EXTRA_ONEPOD_CHANGED: Int = 10001
-    const val EXTRA_AUTO_PLAY_CHANGED: Int = 10002
-    const val EXTRA_AUTO_PAUSE_CHANGED: Int = 10003
-    const val EXTRA_LOW_LATENCY_AUDIO_CHANGED: Int = 10004
-
     /* Shared Preferences */
     const val PREFERENCES_BTHELPER: String = AUTHORITY_BTHELPER + "_preferences"
 
@@ -44,8 +23,6 @@ object Constants {
     const val KEY_SINGLE_DEVICE: String = "key_single_device"
     const val KEY_MAC_ADDRESS: String = "mac_address"
     const val KEY_AUTOMATIC_EAR_DETECTION: String = "automatic_ear_detection"
-    const val KEY_PERSONALIZED_VOLUME: String = "personalized_volume"
-    const val KEY_CONVERSATIONAL_AWARENESS: String = "conversational_awareness"
     const val KEY_CONVERSATIONAL_AWARENESS_PAUSE_MUSIC: String =
         "conversational_awareness_pause_music"
     const val KEY_RELATIVE_CONVERSATIONAL_AWARENESS_VOLUME: String =
@@ -70,9 +47,6 @@ object Constants {
     const val ACTION_CONNECTED: String = AUTHORITY_BTHELPER + ".CONNECTED"
     const val ACTION_DISCONNECTED: String = AUTHORITY_BTHELPER + ".DISCONNECTED"
     const val ACTION_NAME_CHANGED: String = AUTHORITY_BTHELPER + ".NAME_CHANGED"
-
-    const val ACTION_SET_SLICE: String = AUTHORITY_BTHELPER + ".SET_SLICE"
-    const val EXTRA_METADATA_KEY: String = "metadata_key"
 
     const val ACTION_SET_ANC_MODE: String = AUTHORITY_BTHELPER + ".SET_ANC_MODE"
     const val EXTRA_MODE: String = "mode"

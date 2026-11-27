@@ -6,6 +6,7 @@
 package com.android.bluetooth.bthelper.utils
 
 import android.bluetooth.BluetoothDevice
+import android.content.ContentResolver
 import android.net.Uri
 import android.util.Log
 import com.android.bluetooth.bthelper.BtHelperDeviceSettingsConfigService
@@ -47,6 +48,18 @@ fun BluetoothDevice.setMetadataBoolean(key: Int, value: Boolean, force: Boolean 
 
 fun BluetoothDevice.setMetadataInt(key: Int, value: Int, force: Boolean = false): Boolean {
     return this.setMetadataString(key, value.toString(), force)
+}
+
+internal fun BluetoothDevice.clearLegacySettingsSlice(): Boolean {
+    val key = BluetoothDevice.METADATA_ENHANCED_SETTINGS_UI_URI
+    return updateMetadata(key) { current ->
+        if (current == null || current.isEmpty()) return@updateMetadata null
+        val uri = Uri.parse(current.decodeToString())
+        if (uri.scheme == ContentResolver.SCHEME_CONTENT &&
+            uri.authority == "${Constants.AUTHORITY_BTHELPER}.sliceprovider" &&
+            current.contentEquals(getMetadata(key))
+        ) byteArrayOf() else null
+    }
 }
 
 private val deviceSettingsDiscovery = DeviceSettingsDiscovery(
