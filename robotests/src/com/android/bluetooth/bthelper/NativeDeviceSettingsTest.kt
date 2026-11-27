@@ -4,6 +4,7 @@ package com.android.bluetooth.bthelper
 import android.app.Application
 import android.os.Bundle
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.android.bluetooth.bthelper.pods.AccessoryControls
 import com.android.bluetooth.bthelper.pods.AccessoryControls.Control
 import com.android.bluetooth.bthelper.pods.AccessoryControls.State
@@ -21,11 +22,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, qualifiers = "en")
+@RunWith(AndroidJUnit4::class)
 class NativeDeviceSettingsTest {
     private val context = ApplicationProvider.getApplicationContext<Application>()
     private val mapper = NativeDeviceSettings(context)

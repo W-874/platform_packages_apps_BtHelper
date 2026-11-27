@@ -5,6 +5,6 @@ android_robolectric_test {
     srcs: ["src/**/*.kt"],
     instrumentation_for: "BtHelper",
     associates: ["BtHelper"],
-    static_libs: ["androidx.test.core"],
-    strict_mode: false,
+    static_libs: ["androidx.test.core", "androidx.test.ext.junit"],
+    strict_mode: true,
 }
