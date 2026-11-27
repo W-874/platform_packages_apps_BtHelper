@@ -213,14 +213,6 @@ object Constants {
     const val ACTION_BATTERY_LEVEL_CHANGED: String =
         "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
 
-    /**
-     * Used as an Integer extra field in {@link #ACTION_BATTERY_LEVEL_CHANGED} intent. It contains
-     * the most recently retrieved battery level information ranging from 0% to 100% for a remote
-     * device, {@link #BATTERY_LEVEL_UNKNOWN} when the valid is unknown or there is an error,
-     * {@link #BATTERY_LEVEL_BLUETOOTH_OFF} when the bluetooth is off
-     */
-    const val EXTRA_BATTERY_LEVEL: String = "android.bluetooth.device.extra.BATTERY_LEVEL"
-
     // Target Android Settings Intelligence package that have battery widget for data update
     const val PACKAGE_ASI = "com.google.android.settings.intelligence"
 

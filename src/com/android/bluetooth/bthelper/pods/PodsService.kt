@@ -54,7 +54,6 @@ import com.android.bluetooth.bthelper.Constants.ACTION_ASI_UPDATE_BLUETOOTH_DATA
 import com.android.bluetooth.bthelper.Constants.ACTION_BATTERY_LEVEL_CHANGED
 import com.android.bluetooth.bthelper.Constants.ACTION_HF_INDICATORS_VALUE_CHANGED
 import com.android.bluetooth.bthelper.Constants.COMPANION_TYPE_NONE
-import com.android.bluetooth.bthelper.Constants.EXTRA_BATTERY_LEVEL
 import com.android.bluetooth.bthelper.Constants.EXTRA_HF_INDICATORS_IND_ID
 import com.android.bluetooth.bthelper.Constants.EXTRA_HF_INDICATORS_IND_VALUE
 import com.android.bluetooth.bthelper.Constants.HF_INDICATOR_BATTERY_LEVEL_STATUS
@@ -161,6 +160,7 @@ class PodsService :
     private var reconnectJob: Job? = null
     private var discoveryPublished = false
     private val batteryMetadata = PodsBatteryMetadata()
+    private var lastWidgetBattery = BluetoothDevice.BATTERY_LEVEL_UNKNOWN
 
     private var currentDevice: BluetoothDevice? = null
 
@@ -1013,6 +1013,7 @@ class PodsService :
         val device = synchronized(this) {
             val device = currentDevice ?: return
             currentDevice = null
+            lastWidgetBattery = BluetoothDevice.BATTERY_LEVEL_UNKNOWN
             discoveryPublished = false
             device
         }
@@ -1501,12 +1502,15 @@ class PodsService :
             model?.let { !it.isSingle } ?: hasSplitBattery
         }
         val batteryUnified = batteryMetadata.publish(device, batteries, splitBattery)
-        if (batteryUnified in 0..100) broadcastHfIndicatorEventIntent(batteryUnified, device)
+        if (batteryUnified != lastWidgetBattery) {
+            lastWidgetBattery = batteryUnified
+            if (batteryUnified in 0..100) notifyBatteryWidget(batteryUnified, device)
+        }
     }
 
-    // Send broadcasts to Android Settings Intelligence, Bluetooth app, System Settings
-    // to reflect current device status changes
-    private fun broadcastHfIndicatorEventIntent(batteryUnified: Int, device: BluetoothDevice) {
+    // Keep the widget's nested HF payload private to its explicit receiver. SettingsLib
+    // observes metadata; Bluetooth itself owns global HFP and battery change broadcasts.
+    private fun notifyBatteryWidget(batteryUnified: Int, device: BluetoothDevice) {
         // Update battery status for this device
         val intent: Intent =
             Intent(ACTION_HF_INDICATORS_VALUE_CHANGED).apply {
@@ -1514,16 +1518,6 @@ class PodsService :
                 putExtra(EXTRA_HF_INDICATORS_IND_VALUE, batteryUnified)
                 putExtra(BluetoothDevice.EXTRA_DEVICE, device)
             }
-        sendBroadcastAsUser(intent, UserHandle.ALL, Manifest.permission.BLUETOOTH_CONNECT)
-
-        // Broadcast battery level changes
-        val batteryIntent: Intent =
-            Intent(ACTION_BATTERY_LEVEL_CHANGED).apply {
-                putExtra(BluetoothDevice.EXTRA_DEVICE, device)
-                putExtra(EXTRA_BATTERY_LEVEL, batteryUnified)
-            }
-        sendBroadcastAsUser(batteryIntent, UserHandle.ALL, Manifest.permission.BLUETOOTH_CONNECT)
-
         // Update Android Settings Intelligence's battery widget
         val statusIntent: Intent =
             Intent(ACTION_ASI_UPDATE_BLUETOOTH_DATA).apply {
